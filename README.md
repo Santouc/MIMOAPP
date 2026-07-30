@@ -11,9 +11,9 @@ de la mano en 21 puntos a través de una cámara, y traducirlo a texto y voz en 
 
 ## Integrantes del grupo
 
-| Nombre y Apellido | Usuario GitHub | Correo | Rol USM |
+| Nombre y Apellido | Usuario GitHub | Correo | LinkedIn |
 | ----------------- | -------------- | ------ | ------- |
-| Santiago Silva | @Santouc | ssilvap@usm.cl | 202630009-9 |
+| Santiago Silva | @Santouc | ssilvap@usm.cl | [https://www.linkedin.com/in/santiago-silva-06b44a416](https://www.linkedin.com/in/santiago-silva-06b44a416/)/) |
 
 > *"Nuestra motivación es facilitar la comunicación entre las personas sordomudas y el resto de la sociedad."*
 
