@@ -13,7 +13,7 @@ de la mano en 21 puntos a través de una cámara, y traducirlo a texto y voz en 
 | ----------------- | -------------- | ------ | ------- |
 | Santiago Silva | @Santouc | ssilvap@usm.cl | [https://www.linkedin.com/in/santiago-silva-06b44a416](https://www.linkedin.com/in/santiago-silva-06b44a416/)/) |
 
-> *"Nuestra motivación es facilitar la comunicación entre las personas sordomudas y el resto de la sociedad."*
+> *"La motivación es facilitar la comunicación entre las personas sordomudas y el resto de la sociedad."*
 
 ---
 
