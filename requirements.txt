@@ -1,0 +1,32 @@
+# Dependencias principales para el traductor de lenguaje de señas
+# Compatible con Python 3.9-3.12 (usando versiones pre-compiladas)
+
+# OpenCV para procesamiento de imágenes
+opencv-python>=4.8.0
+
+# MediaPipe para detección de landmarks de manos
+mediapipe>=0.10.0
+
+# TensorFlow para clasificación de señas
+tensorflow>=2.13.0
+
+# NumPy para operaciones numéricas
+numpy>=1.24.0
+
+# Sistema de texto a voz (opcional)
+pyttsx3>=2.90
+
+# Procesamiento de audio (opcional)
+scipy>=1.10.0
+
+# Herramientas adicionales
+matplotlib>=3.7.0
+pillow>=10.0.0
+PySide6>=6.6.0
+
+# Diccionario de frecuencias del español 
+wordfreq>=3.0.0
+
+# Desarrollo y testing (opcional)
+pytest>=7.4.0
+black>=23.0.0

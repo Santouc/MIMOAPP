@@ -1,0 +1,20 @@
+{
+  "token_map": {
+    "ESPACIO": " ",
+    "SPACE": " ",
+    "BORRAR": "<BACKSPACE>",
+    "DELETE": "<BACKSPACE>",
+    "LIMPIAR": "<CLEAR>",
+    "CLEAR": "<CLEAR>"
+  },
+  "word_map": {
+    "HOLA": "hola",
+    "CHAO": "chao",
+    "ADIOS": "adiós",
+    "GRACIAS": "gracias",
+    "PORFAVOR": "por favor",
+    "SI": "sí",
+    "NO": "no"
+  },
+  "language": "es"
+}

@@ -1,0 +1,36 @@
+{
+  "X": [],
+  "y": [],
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "H",
+    "I",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "T",
+    "U",
+    "V",
+    "W",
+    "Y",
+    "Z"
+  ],
+  "metadata": {
+    "type": "dynamic",
+    "num_samples": 0,
+    "num_classes": 22,
+    "landmark_format": "mediapipe_21_3d",
+    "coordinate_system": "normalized",
+    "updated_at": "2026-07-14T23:58:29"
+  }
+}

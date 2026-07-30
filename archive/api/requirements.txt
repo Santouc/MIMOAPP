@@ -1,0 +1,18 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+tensorflow==2.13.0
+numpy==1.24.3
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# Opcional para TFLite (edge deployment)
+# tflite-runtime==2.13.0
+
+# Opcional para logging avanzado
+# structlog==23.1.0
+
+# Opcional para monitoreo
+# prometheus-client==0.17.1
+
+# Opcional para rate limiting
+# slowapi==0.1.9
