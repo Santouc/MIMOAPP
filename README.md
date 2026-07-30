@@ -1,6 +1,4 @@
-# T.L.S — Traductor de Lengua de Señas
-
-### Proyecto Inicial (IWG400) · Grupo 7 · 2026
+# MIMOAPP
 
 *Software capaz de aprender **cualquier** lenguaje de señas mediante el reconocimiento
 de la mano en 21 puntos a través de una cámara, y traducirlo a texto y voz en tiempo real.*
@@ -9,7 +7,7 @@ de la mano en 21 puntos a través de una cámara, y traducirlo a texto y voz en 
 
 ---
 
-## Integrantes del grupo
+## Desarrollador Principal
 
 | Nombre y Apellido | Usuario GitHub | Correo | LinkedIn |
 | ----------------- | -------------- | ------ | ------- |
