@@ -1,0 +1,37 @@
+# Control de versiones
+.git
+.gitignore
+.gitattributes
+
+# Entornos virtuales y cachés
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Código legado no necesario en runtime
+archive/
+
+# Artefactos de build
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+
+# Docker (evita recursión)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Modelos invalidados
+data/models/*.deleted_sign_*.h5
+
+# Otros
+GITHUB_PROFILE_README.md
+*.log

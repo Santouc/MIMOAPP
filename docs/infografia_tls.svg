@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1000" viewBox="0 0 1400 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Infografía del sistema T.L.S</title>
+  <desc id="desc">Flujo de T.L.S desde la cámara y los 21 landmarks hasta la clasificación, transcripción, memoria y voz local.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="1" stop-color="#101d35"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#16a34a"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#67e8f9"/>
+    </marker>
+    <style>
+      .font { font-family: 'Segoe UI', Arial, sans-serif; fill: #e5e7eb; }
+      .title { font-size: 42px; font-weight: 750; letter-spacing: 1px; }
+      .subtitle { font-size: 19px; fill: #a5b4fc; }
+      .section { font-size: 14px; font-weight: 700; letter-spacing: 2px; fill: #67e8f9; text-transform: uppercase; }
+      .card-title { font-size: 19px; font-weight: 700; fill: #f8fafc; }
+      .card-text { font-size: 14px; fill: #cbd5e1; }
+      .small { font-size: 13px; fill: #94a3b8; }
+      .metric { font-size: 24px; font-weight: 750; fill: #f8fafc; }
+      .metric-label { font-size: 13px; fill: #cbd5e1; }
+      .line { stroke: #67e8f9; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .thin-line { stroke: #334155; stroke-width: 2; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="1000" fill="url(#bg)"/>
+  <circle cx="1270" cy="90" r="190" fill="#1d4ed8" opacity="0.11"/>
+  <circle cx="90" cy="890" r="220" fill="#7c3aed" opacity="0.10"/>
+
+  <text x="60" y="70" class="font title">T.L.S</text>
+  <text x="60" y="108" class="font subtitle">Traductor de Lengua de Señas · visión + machine learning + transcripción local</text>
+  <text x="1340" y="72" text-anchor="end" class="font section">MAPA DEL SISTEMA</text>
+  <text x="1340" y="106" text-anchor="end" class="font small">De la cámara a una frase comprensible</text>
+
+  <text x="60" y="155" class="font section">1 · PERCEPCIÓN</text>
+  <text x="685" y="155" class="font section">2 · INTERPRETACIÓN</text>
+  <text x="1180" y="155" class="font section">3 · SALIDA</text>
+
+  <g filter="url(#shadow)">
+    <rect x="50" y="180" width="180" height="250" rx="18" fill="#111f35" stroke="#2563eb" stroke-width="2"/>
+    <rect x="245" y="180" width="180" height="250" rx="18" fill="#111f35" stroke="#0891b2" stroke-width="2"/>
+    <rect x="440" y="180" width="200" height="250" rx="18" fill="#111f35" stroke="#0ea5e9" stroke-width="2"/>
+    <rect x="680" y="180" width="270" height="250" rx="18" fill="#111f35" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="990" y="180" width="180" height="250" rx="18" fill="#111f35" stroke="#8b5cf6" stroke-width="2"/>
+    <rect x="1190" y="180" width="170" height="250" rx="18" fill="#111f35" stroke="#16a34a" stroke-width="2"/>
+  </g>
+
+  <g class="font">
+    <text x="70" y="218" class="card-title">Cámara</text>
+    <text x="70" y="245" class="card-text">OpenCV</text>
+    <rect x="75" y="268" width="130" height="92" rx="10" fill="#020617" stroke="#334155"/>
+    <rect x="91" y="283" width="98" height="61" rx="6" fill="#172554" stroke="#38bdf8"/>
+    <circle cx="140" cy="313" r="18" fill="#0f172a" stroke="#67e8f9" stroke-width="3"/>
+    <circle cx="140" cy="313" r="7" fill="#22d3ee"/>
+    <text x="70" y="389" class="card-text">640 × 480</text>
+    <text x="70" y="412" class="small">captura · espejo · frame</text>
+
+    <text x="265" y="218" class="card-title">Detección</text>
+    <text x="265" y="245" class="card-text">MediaPipe Tasks</text>
+    <g stroke="#38bdf8" stroke-width="2" fill="#e0f2fe">
+      <path d="M300 350 L302 293 L319 274 L335 288 L350 265 L365 284 L380 278 L392 302 L379 320 L365 336 L350 350 Z" fill="none"/>
+      <circle cx="300" cy="350" r="4"/><circle cx="302" cy="293" r="4"/><circle cx="319" cy="274" r="4"/><circle cx="335" cy="288" r="4"/><circle cx="350" cy="265" r="4"/><circle cx="365" cy="284" r="4"/><circle cx="380" cy="278" r="4"/><circle cx="392" cy="302" r="4"/><circle cx="379" cy="320" r="4"/><circle cx="365" cy="336" r="4"/><circle cx="350" cy="350" r="4"/><circle cx="330" cy="310" r="4"/><circle cx="345" cy="300" r="4"/><circle cx="360" cy="300" r="4"/><circle cx="375" cy="310" r="4"/><circle cx="335" cy="325" r="4"/><circle cx="350" cy="320" r="4"/><circle cx="365" cy="323" r="4"/><circle cx="335" cy="340" r="4"/><circle cx="350" cy="338" r="4"/><circle cx="365" cy="340" r="4"/>
+    </g>
+    <text x="265" y="389" class="metric">21</text>
+    <text x="308" y="389" class="card-text">landmarks × 3D</text>
+    <text x="265" y="412" class="small">una mano prioritaria</text>
+
+    <text x="460" y="218" class="card-title">Preparación</text>
+    <text x="460" y="245" class="card-text">Core pipeline</text>
+    <circle cx="480" cy="285" r="16" fill="url(#cyan)"/><text x="480" y="291" text-anchor="middle" class="font" font-size="15" font-weight="700">1</text>
+    <text x="510" y="291" class="card-text">suavizar frame</text>
+    <circle cx="480" cy="325" r="16" fill="url(#cyan)"/><text x="480" y="331" text-anchor="middle" class="font" font-size="15" font-weight="700">2</text>
+    <text x="510" y="331" class="card-text">CLAHE / luz</text>
+    <circle cx="480" cy="365" r="16" fill="url(#cyan)"/><text x="480" y="371" text-anchor="middle" class="font" font-size="15" font-weight="700">3</text>
+    <text x="510" y="371" class="card-text">centrar + escalar</text>
+    <text x="460" y="412" class="small">tracking: OK · RECUPERANDO · PERDIDO</text>
+
+    <text x="700" y="218" class="card-title">Clasificación</text>
+    <text x="700" y="245" class="card-text">TensorFlow / Keras</text>
+    <rect x="705" y="270" width="220" height="58" rx="12" fill="#172554" stroke="#38bdf8"/>
+    <text x="720" y="295" class="card-text" font-weight="700">ESTÁTICA</text>
+    <text x="720" y="315" class="small">1 pose → MLP → etiqueta</text>
+    <rect x="705" y="345" width="220" height="58" rx="12" fill="#2e1065" stroke="#a78bfa"/>
+    <text x="720" y="370" class="card-text" font-weight="700">DINÁMICA</text>
+    <text x="720" y="390" class="small">20 frames → BiLSTM</text>
+    <text x="700" y="420" class="small">consenso · confianza · movimiento</text>
+
+    <text x="1010" y="218" class="card-title">Transcripción</text>
+    <text x="1010" y="245" class="card-text">Service local</text>
+    <text x="1010" y="282" class="card-text">H O L A</text>
+    <path d="M1010 300 H1140" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="1010" y="330" class="small">wordfreq · reglas</text>
+    <text x="1010" y="354" class="small">segmentación DP</text>
+    <text x="1010" y="378" class="small">memoria · tildes</text>
+    <text x="1010" y="412" class="card-text">6 idiomas</text>
+
+    <text x="1210" y="218" class="card-title">Salida</text>
+    <text x="1210" y="245" class="card-text">Comunicación</text>
+    <rect x="1210" y="275" width="130" height="52" rx="10" fill="#052e16" stroke="#4ade80"/>
+    <text x="1275" y="307" text-anchor="middle" class="card-text">Texto</text>
+    <rect x="1210" y="342" width="130" height="52" rx="10" fill="#052e16" stroke="#4ade80"/>
+    <text x="1275" y="374" text-anchor="middle" class="card-text">Voz local</text>
+    <text x="1210" y="412" class="small">pyttsx3 · extensión</text>
+  </g>
+
+  <path d="M230 305 H240" class="line"/>
+  <path d="M425 305 H435" class="line"/>
+  <path d="M645 305 H675" class="line"/>
+  <path d="M955 305 H985" class="line"/>
+  <path d="M1175 305 H1185" class="line"/>
+
+  <text x="60" y="500" class="font section">4 · APRENDIZAJE Y OPERACIÓN</text>
+  <g filter="url(#shadow)">
+    <rect x="50" y="525" width="300" height="220" rx="18" fill="#111f35" stroke="#22d3ee" stroke-width="2"/>
+    <rect x="380" y="525" width="300" height="220" rx="18" fill="#111f35" stroke="#4ade80" stroke-width="2"/>
+    <rect x="710" y="525" width="300" height="220" rx="18" fill="#111f35" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="1040" y="525" width="310" height="220" rx="18" fill="#111f35" stroke="#a78bfa" stroke-width="2"/>
+  </g>
+  <g class="font">
+    <text x="75" y="565" class="card-title">Enseñar una seña</text>
+    <text x="75" y="598" class="card-text">capturar → revisar → aceptar</text>
+    <text x="75" y="630" class="small">static: muestras individuales</text>
+    <text x="75" y="655" class="small">dynamic: secuencias de 20 frames</text>
+    <text x="75" y="688" class="small">rechazo humano antes de guardar</text>
+    <text x="75" y="721" class="small">reentrenamiento automático</text>
+
+    <text x="405" y="565" class="card-title">Persistencia</text>
+    <text x="405" y="598" class="card-text">data/</text>
+    <text x="405" y="630" class="small">datasets JSON · labels</text>
+    <text x="405" y="655" class="small">model.h5 · model_dynamic.h5</text>
+    <text x="405" y="680" class="small">rules.json · memory.json</text>
+    <text x="405" y="705" class="small">signs.json · extensions.json</text>
+    <text x="405" y="730" class="small">portable · local · auditable</text>
+
+    <text x="735" y="565" class="card-title">Gestión</text>
+    <text x="735" y="598" class="card-text">vocabulario bajo control</text>
+    <text x="735" y="630" class="small">agregar señas / importar A-Z</text>
+    <text x="735" y="655" class="small">eliminar + reindexar + reentrenar</text>
+    <text x="735" y="680" class="small">reset protegido con RESET</text>
+    <text x="735" y="713" class="small">AppContext coordina servicios</text>
+
+    <text x="1065" y="565" class="card-title">Extensiones</text>
+    <text x="1065" y="598" class="card-text">plugins sin tocar el núcleo</text>
+    <text x="1065" y="630" class="small">setup(context)</text>
+    <text x="1065" y="655" class="small">translate_actions(screen)</text>
+    <text x="1065" y="680" class="small">transcription_changed(state)</text>
+    <text x="1065" y="705" class="small">shutdown()</text>
+    <text x="1065" y="730" class="small">incluida: voz · V · pausa 2 s</text>
+  </g>
+
+  <path d="M200 430 V505" class="line"/>
+  <path d="M535 430 V505" class="line"/>
+  <path d="M820 430 V505" class="line"/>
+  <path d="M1275 430 V505" class="line"/>
+
+  <rect x="50" y="805" width="1300" height="125" rx="18" fill="#020617" stroke="#334155"/>
+  <text x="75" y="840" class="font section">ESTADO DEL SNAPSHOT · 31-07-2026</text>
+  <g class="font">
+    <text x="75" y="883" class="metric">22</text>
+    <text x="75" y="908" class="metric-label">labels registradas</text>
+    <text x="300" y="883" class="metric">632</text>
+    <text x="300" y="908" class="metric-label">muestras estáticas</text>
+    <text x="550" y="883" class="metric">10</text>
+    <text x="550" y="908" class="metric-label">clases con muestras</text>
+    <text x="790" y="883" class="metric">0</text>
+    <text x="790" y="908" class="metric-label">secuencias dinámicas</text>
+    <text x="1040" y="883" class="metric">1</text>
+    <text x="1040" y="908" class="metric-label">modelo estático listo</text>
+    <text x="75" y="928" class="small">La arquitectura dinámica está implementada, pero requiere datos y model_dynamic.h5 para una demo completa.</text>
+  </g>
+</svg>

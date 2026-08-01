@@ -1,0 +1,24 @@
+
+services:
+  tls:
+    build: .
+    image: tls-app
+    container_name: tls
+    # network_mode host simplifica la autenticación X11 en Linux
+    network_mode: host
+    environment:
+      # Pantalla del host (Linux/WSLg la exportan automáticamente)
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      # Audio PulseAudio (opcional, para la extensión de voz)
+      - PULSE_SERVER=unix:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native
+    volumes:
+      # Socket X11 para mostrar la ventana
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Persistir datos (señas, datasets, modelos, memoria) fuera del contenedor
+      - ./data:/app/data
+      # Socket PulseAudio (opcional; si no existe, la voz queda desactivada)
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse:ro
+    devices:
+      # Cámara web (Linux). Cambiar si tu cámara es /dev/video1, etc.
+      - /dev/video0:/dev/video0

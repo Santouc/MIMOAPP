@@ -128,6 +128,7 @@ T.L.S/
 ├── docs/                                   # Documentación
 │   ├── anexo_tecnico.md                    # Anexo técnico
 │   ├── conceptos.md                        # Conceptos teóricos
+│   ├── docker.md                           # Guía para ejecutar con Docker
 │   └── manual_uso.md                       # Manual de uso
 ├── extensions/                             # Extensiones opcionales
 │   ├── voz/
@@ -156,8 +157,12 @@ T.L.S/
 ├── visualization/                          # Visualización de landmarks
 │   ├── __init__.py
 │   └── landmark_average.py                 # Promedio animado de capturas
+├── .dockerignore                           # Archivos excluidos de la imagen Docker
 ├── .gitignore                              # Archivos ignorados por Git
 ├── desktop_app.py                          # Punto de entrada de la aplicación
+├── docker-compose.yml                      # Orquestación del contenedor
+├── docker-run.sh                           # Lanzador Docker para Linux
+├── Dockerfile                              # Imagen Docker de la aplicación
 ├── README.md                               # Este archivo
 └── requirements.txt                        # Dependencias del proyecto
 ```
@@ -184,6 +189,24 @@ py -m pip install -r requirements.txt
 ```powershell
 py desktop_app.py
 ```
+
+### Alternativa: ejecutar con Docker (recomendado en Linux)
+
+Si no quieres instalar dependencias manualmente, la app incluye configuración
+Docker lista para usar:
+
+```bash
+git clone https://github.com/Santouc/MIMOAPP.git
+cd MIMOAPP
+bash docker-run.sh
+```
+
+El contenedor incluye Python, PySide6, TensorFlow, MediaPipe y el motor de voz.
+Los datos (señas, modelos, memoria) se guardan fuera del contenedor y persisten
+entre ejecuciones.
+
+> Guía completa por sistema operativo (Linux/Windows/macOS), acceso a cámara y
+> solución de problemas en **`docs/docker.md`**.
 
 ### Flujo recomendado
 
