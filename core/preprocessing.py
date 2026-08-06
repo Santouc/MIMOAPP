@@ -2,6 +2,20 @@
 """
 Módulo centralizado de preprocesamiento de landmarks
 Normalización de traducción y escala consistente en todo el sistema
+
+Todas las etapas del proyecto (captura de dataset, entrenamiento e
+inferencia en tiempo real) deben usar estas funciones para garantizar
+que los landmarks lleguen al modelo con exactamente el mismo formato:
+
+- normalize_landmarks: normalización estándar de manos estáticas
+  (centrado en la muñeca + escala relativa al tamaño de la mano).
+- normalize_dynamic_sequence(s): normalización de secuencias dinámicas
+  que preserva la trayectoria global del gesto.
+- preprocess_for_inference / preprocess_for_training: envoltorios de
+  conveniencia con los shapes que espera TensorFlow.
+
+Mantener este preprocesamiento centralizado evita inconsistencias entre
+los datos de entrenamiento y los datos de inferencia.
 """
 
 import numpy as np
@@ -65,6 +79,9 @@ def normalize_landmarks(landmarks: Union[np.ndarray, List[List[Tuple[float, floa
     # ====================
     # Usar longitud del hueso medio del dedo índice como referencia
     # landmarks[5] = MCP del índice, landmarks[6] = PIP del índice
+    # Nota: como los datos ya están centrados en la muñeca, la norma del
+    # landmark 9 (MCP del dedo medio) equivale a la distancia muñeca->nudillo,
+    # una medida estable del tamaño de la mano en la imagen.
     scale = np.linalg.norm(X[:, 9:10, :], axis=2, keepdims=True)
     
     # Evitar división por cero
@@ -94,8 +111,10 @@ def normalize_dynamic_sequence(sequence: Union[np.ndarray, List[List[Tuple[float
     Returns:
         Array normalizado shape (T, 21, 3)
     """
+    # Convertir a array float32 y copiar para no modificar el original
     seq = np.asarray(sequence, dtype=np.float32).copy()
 
+    # Validar que la secuencia tenga el formato (T frames, 21 landmarks, 3 coords)
     if seq.ndim != 3 or seq.shape[1] != 21 or seq.shape[2] != 3:
         raise ValueError(f"Shape inválido: {seq.shape}, esperado (T, 21, 3)")
 
@@ -116,9 +135,11 @@ def normalize_dynamic_sequences(sequences: Union[np.ndarray, List]) -> np.ndarra
     Normalización de un batch de secuencias dinámicas shape (N, T, 21, 3),
     preservando la trayectoria de cada secuencia.
     """
+    # Validar formato del batch antes de procesar
     batch = np.asarray(sequences, dtype=np.float32)
     if batch.ndim != 4 or batch.shape[2] != 21 or batch.shape[3] != 3:
         raise ValueError(f"Shape inválido: {batch.shape}, esperado (N, T, 21, 3)")
+    # Normalizar cada secuencia de forma independiente y apilar el resultado
     return np.stack([normalize_dynamic_sequence(seq) for seq in batch])
 
 
@@ -159,12 +180,14 @@ def preprocess_for_inference(landmarks: List[List[Tuple[float, float, float]]]) 
     Returns:
         Array preprocesado shape (1, 21, 3)
     """
+    # Si no hay manos detectadas, devolver un array de ceros del shape esperado
     if not landmarks or len(landmarks) == 0:
         return np.zeros((1, 21, 3), dtype=np.float32)
     
     # Tomar solo la primera mano
     hand = landmarks[0]
     
+    # Descartar detecciones incompletas (deben ser exactamente 21 landmarks)
     if len(hand) != 21:
         return np.zeros((1, 21, 3), dtype=np.float32)
     
@@ -188,6 +211,8 @@ def preprocess_for_training(landmarks: np.ndarray) -> np.ndarray:
     return normalize_landmarks(landmarks)
 
 
+# Bloque de autoprueba: se ejecuta solo al correr este archivo directamente
+# (py core/preprocessing.py) y verifica shapes y rangos de la normalización.
 if __name__ == "__main__":
     # Prueba básica
     print("=== Prueba de Preprocesamiento ===")

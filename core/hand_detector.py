@@ -2,6 +2,15 @@
 """
 Módulo de detección de manos usando MediaPipe
 Responsable de detectar landmarks de manos en tiempo real
+
+Este módulo encapsula la API de MediaPipe Tasks (HandLandmarker) para:
+- Detectar hasta N manos en un frame de video (formato BGR de OpenCV).
+- Extraer los 21 landmarks 3D normalizados de cada mano detectada.
+- Dibujar los landmarks y sus conexiones sobre el frame para visualización.
+- Determinar heurísticamente qué dedos están extendidos.
+
+Incluye además un modo de "fallback" simulado que genera landmarks fijos
+con forma de mano, útil para pruebas cuando MediaPipe no está disponible.
 """
 
 import cv2
@@ -16,6 +25,8 @@ except ImportError:
     print("MediaPipe no está instalado")
     mp = None
 
+# Clase principal de detección: envuelve el HandLandmarker de MediaPipe Tasks
+# y expone métodos de alto nivel (detect, draw_landmarks, get_finger_states).
 class HandDetector:
     """Detector de manos basado en MediaPipe Hands"""
     
@@ -32,12 +43,14 @@ class HandDetector:
             model_path: Ruta al archivo del modelo (default: data/models/hand_landmarker.task)
             use_simulated_fallback: Activa landmarks simulados si MediaPipe falla
         """
+        # Guardar la configuración recibida para referencia posterior
         self.max_hands = max_hands
         self.detection_confidence = detection_confidence
         self.tracking_confidence = tracking_confidence
         self.use_simulated_fallback = use_simulated_fallback
         self.hand_landmarker = None
         
+        # Si MediaPipe no pudo importarse, no se puede crear el detector real
         if mp is None:
             print("Error: MediaPipe no está disponible")
             return
@@ -53,6 +66,7 @@ class HandDetector:
         
         # Usar la nueva API de MediaPipe Tasks con modelo descargado
         try:
+            # Referencias a las clases de la API de MediaPipe Tasks
             HandLandmarker = mp.tasks.vision.HandLandmarker
             VisionRunningMode = mp.tasks.vision.RunningMode
             
@@ -118,6 +132,7 @@ class HandDetector:
                 
                 return hand_landmarks_list
             
+            # No se detectaron manos en este frame
             return None
             
         except Exception as e:
@@ -128,6 +143,8 @@ class HandDetector:
     
     def _detect_simulated(self, frame: np.ndarray) -> List[List[Tuple[float, float, float]]]:
         """Detección simulada como fallback"""
+        # Genera 21 landmarks fijos (coordenadas normalizadas 0-1) con forma
+        # de mano abierta, para poder probar el pipeline sin MediaPipe.
         h, w = frame.shape[:2]
         
         # Crear puntos simulados en forma de mano
@@ -177,6 +194,7 @@ class HandDetector:
         Returns:
             Frame con landmarks dibujados
         """
+        # Si no hay manos detectadas, devolver el frame sin modificar
         if not landmarks_list:
             return frame
         
@@ -228,6 +246,7 @@ class HandDetector:
             (0, 17)
         ]
         
+        # Dibujar una línea azul por cada par de landmarks conectados
         for start_idx, end_idx in connections:
             if start_idx < len(landmarks) and end_idx < len(landmarks):
                 start_point = landmarks[start_idx]
@@ -244,6 +263,7 @@ class HandDetector:
         Returns:
             Lista de 5 booleanos: [pulgar, indice, medio, anular, menique]
         """
+        # Validar que se recibieron los 21 landmarks esperados
         if len(landmarks) != 21:
             return [False] * 5
         
@@ -272,5 +292,6 @@ class HandDetector:
     
     def cleanup(self):
         """Libera recursos de MediaPipe"""
+        # Cerrar el HandLandmarker para liberar la memoria del modelo cargado
         if hasattr(self, 'hand_landmarker'):
             self.hand_landmarker.close()

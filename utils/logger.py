@@ -2,6 +2,20 @@
 """
 Módulo de logging del sistema
 Proporciona funcionalidad de registro centralizada
+
+Este módulo define la clase Logger, un envoltorio (wrapper) sobre el módulo
+estándar "logging" de Python, adaptado a las necesidades del traductor de
+lenguaje de señas. Permite:
+
+- Registrar mensajes en consola y/o archivo según la configuración.
+- Métodos de conveniencia por nivel (debug, info, warning, error, critical).
+- Registros especializados del dominio: rendimiento, detecciones de señas,
+  información del sistema y de la cámara.
+- Crear logs por sesión, cambiar el nivel en tiempo de ejecución, obtener
+  estadísticas del archivo de log y limpiar logs antiguos.
+
+También expone la función get_logger(), que devuelve una instancia global
+compartida para usar el mismo logger en todo el sistema.
 """
 
 import logging
@@ -11,7 +25,15 @@ from datetime import datetime
 from typing import Optional
 
 class Logger:
-    """Clase de logging centralizada para el sistema"""
+    """
+    Clase de logging centralizada para el sistema
+
+    Encapsula un logger del módulo estándar "logging" y lo configura a
+    partir de un diccionario de opciones (nivel, formato, salida a consola
+    y/o archivo). Además de los métodos clásicos por nivel, incluye métodos
+    específicos del dominio del traductor de señas (log_detection,
+    log_performance, log_camera_info, etc.).
+    """
     
     def __init__(self, name: str = "SignTranslator", config: Optional[dict] = None):
         """
@@ -21,6 +43,8 @@ class Logger:
             name: Nombre del logger
             config: Configuración personalizada de logging
         """
+        # Se guarda el nombre y se obtiene (o crea) el logger nativo de
+        # Python asociado a ese nombre.
         self.name = name
         self.logger = logging.getLogger(name)
         
@@ -121,20 +145,26 @@ class Logger:
     
     def log_system_info(self):
         """Registra información del sistema"""
+        # Importaciones locales para no cargar estas librerías si el método
+        # nunca se utiliza.
         import platform
         import cv2
         
+        # Datos básicos: sistema operativo, versión de Python y de OpenCV.
         self.info("=== System Information ===")
         self.info(f"Platform: {platform.system()} {platform.release()}")
         self.info(f"Python: {platform.python_version()}")
         self.info(f"OpenCV: {cv2.__version__}")
         
+        # Se intenta registrar la versión de MediaPipe; si no está instalado
+        # se deja una advertencia en lugar de fallar.
         try:
             import mediapipe as mp
             self.info(f"MediaPipe: {mp.__version__}")
         except ImportError:
             self.warning("MediaPipe not available")
         
+        # Mismo tratamiento para TensorFlow: es opcional en tiempo de log.
         try:
             import tensorflow as tf
             self.info(f"TensorFlow: {tf.__version__}")
@@ -163,6 +193,8 @@ class Logger:
         Returns:
             Ruta del archivo de log de la sesión
         """
+        # El nombre del archivo incluye fecha y hora para que cada sesión
+        # tenga su propio log y no se sobrescriban entre sí.
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_log_file = f"logs/session_{timestamp}.log"
         
@@ -170,6 +202,8 @@ class Logger:
         session_handler = logging.FileHandler(session_log_file)
         session_handler.setLevel(logging.DEBUG)
         
+        # Formato detallado que incluye función y número de línea, útil
+        # para depurar una sesión concreta.
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
         )
@@ -187,6 +221,8 @@ class Logger:
         Args:
             level: Nuevo nivel de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         """
+        # getattr lanza AttributeError si el nombre del nivel no existe en
+        # el módulo logging; en ese caso se informa el error sin interrumpir.
         try:
             log_level = getattr(logging, level.upper())
             self.logger.setLevel(log_level)
@@ -206,6 +242,8 @@ class Logger:
         Returns:
             Diccionario con estadísticas del log
         """
+        # Solo tiene sentido si el logging a archivo está habilitado y el
+        # archivo realmente existe en disco.
         if not self.config['file_enabled']:
             return {"error": "File logging is disabled"}
         
@@ -214,6 +252,7 @@ class Logger:
             return {"error": "Log file does not exist"}
         
         try:
+            # Se lee el archivo completo en memoria línea por línea.
             with open(log_file, 'r') as f:
                 lines = f.readlines()
             
@@ -226,11 +265,15 @@ class Logger:
                 'CRITICAL': 0
             }
             
+            # Se recorre cada línea buscando el nivel de log embebido en el
+            # formato estándar (" - NIVEL - ") para acumular los conteos.
             for line in lines:
                 for level in level_counts:
                     if f' - {level} - ' in line:
                         level_counts[level] += 1
             
+            # Se devuelven las estadísticas: total de líneas, conteo por
+            # nivel, tamaño del archivo y fecha de última modificación.
             return {
                 'total_lines': len(lines),
                 'level_counts': level_counts,
@@ -250,15 +293,21 @@ class Logger:
         """
         import time
         
+        # Si no hay directorio de logs configurado o no existe, no hay
+        # nada que limpiar.
         log_dir = os.path.dirname(self.config['log_file'])
         if not log_dir or not os.path.exists(log_dir):
             return
         
+        # Se calcula la fecha límite: todo archivo modificado antes de este
+        # instante (en segundos desde época Unix) se considera antiguo.
         current_time = time.time()
         cutoff_time = current_time - (days_to_keep * 24 * 60 * 60)
         
         deleted_files = []
         
+        # Se recorren los archivos .log del directorio y se eliminan los
+        # que superan la antigüedad permitida.
         for filename in os.listdir(log_dir):
             if filename.endswith('.log'):
                 file_path = os.path.join(log_dir, filename)
@@ -269,6 +318,7 @@ class Logger:
                     except Exception as e:
                         self.error(f"Error deleting log file {filename}: {e}")
         
+        # Se informa el resultado de la limpieza.
         if deleted_files:
             self.info(f"Cleaned up {len(deleted_files)} old log files")
         else:
@@ -290,6 +340,8 @@ def get_logger(name: str = "SignTranslator", config: Optional[dict] = None) -> L
     """
     global _global_logger
     
+    # Patrón singleton simple: se reutiliza la instancia existente salvo
+    # que aún no exista o que se pida un logger con otro nombre.
     if _global_logger is None or _global_logger.name != name:
         _global_logger = Logger(name, config)
     

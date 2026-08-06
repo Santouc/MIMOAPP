@@ -2,6 +2,18 @@
 """
 Módulo centralizado de utilidades para datasets
 Carga, guardado y validación de datasets de landmarks
+
+Los datasets del proyecto se almacenan en archivos JSON con tres campos
+principales:
+- "X": lista de muestras de landmarks con shape (N, 21, 3)
+- "y": lista de etiquetas enteras, una por muestra
+- "labels": lista de nombres de clases (por ejemplo, letras del alfabeto)
+
+Este módulo provee funciones para:
+- load_dataset / save_dataset: entrada/salida en formato JSON con validación.
+- validate_dataset: chequeos de integridad (shapes, rangos, clases presentes).
+- merge_datasets: fusión de varios datasets en uno solo.
+- split_dataset: división en train/val/test con opción de estratificación.
 """
 
 import json
@@ -10,6 +22,7 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Optional
 import logging
 
+# Logger del módulo para registrar operaciones de carga/guardado
 logger = logging.getLogger(__name__)
 
 
@@ -36,10 +49,12 @@ def load_dataset(filepath: str) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     filepath = Path(filepath)
     
+    # Verificar que el archivo exista antes de intentar leerlo
     if not filepath.exists():
         raise FileNotFoundError(f"Dataset no encontrado: {filepath}")
     
     try:
+        # Leer y parsear el archivo JSON completo
         with open(filepath, 'r', encoding='utf-8') as f:
             dataset = json.load(f)
         
@@ -47,6 +62,7 @@ def load_dataset(filepath: str) -> Tuple[np.ndarray, np.ndarray, List[str]]:
         if 'X' not in dataset or 'y' not in dataset or 'labels' not in dataset:
             raise ValueError("Dataset inválido: faltan campos X, y o labels")
         
+        # Convertir las listas JSON a arrays numpy con los dtypes esperados
         X = np.array(dataset['X'], dtype=np.float32)
         y = np.array(dataset['y'], dtype=np.int32)
         labels = dataset['labels']
@@ -99,6 +115,7 @@ def save_dataset(X: np.ndarray, y: np.ndarray, labels: List[str],
         raise ValueError(f"Shape mismatch: X tiene {X.shape[0]} muestras, y tiene {len(y)}")
     
     # Metadatos por defecto
+    # (describen el formato de los landmarks para trazabilidad del dataset)
     default_metadata = {
         "num_samples": int(X.shape[0]),
         "num_classes": len(labels),
@@ -106,9 +123,11 @@ def save_dataset(X: np.ndarray, y: np.ndarray, labels: List[str],
         "coordinate_system": "normalized"
     }
     
+    # Combinar metadatos por defecto con los proporcionados por el usuario
     if metadata:
         default_metadata.update(metadata)
     
+    # Estructura final del dataset (los arrays se serializan como listas JSON)
     dataset = {
         "X": X.tolist(),
         "y": y.tolist(),
