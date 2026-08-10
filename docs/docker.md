@@ -10,9 +10,9 @@ nada manualmente y los problemas de "en mi máquina no funciona".
 
 | Sistema | Ventana (GUI) | Cámara | Voz | Dificultad |
 | ------- | ------------- | ------ | --- | ---------- |
-| **Linux** | ✅ X11 nativo | ✅ `/dev/video0` | ✅ PulseAudio | Baja |
-| **Windows 10/11** | ✅ vía WSLg | ⚠️ requiere `usbipd` | ⚠️ vía WSLg | Media |
-| **macOS** | ⚠️ vía XQuartz | ❌ no soportada | ❌ | Alta |
+| **Linux** | X11 nativo | `/dev/video0` | PulseAudio | Baja |
+| **Windows 10/11** | vía WSLg | requiere `usbipd` | vía WSLg | Media |
+| **macOS** | vía XQuartz | no soportada |  | Alta |
 
 Para Windows y macOS, si Docker resulta complejo, la alternativa más simple
 sigue siendo la instalación nativa (`pip install -r requirements.txt`).
