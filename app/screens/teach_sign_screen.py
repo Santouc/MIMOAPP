@@ -11,8 +11,9 @@ el que un usuario agrega nuevas muestras de una seña al dataset del sistema:
    detecta los 21 puntos de referencia (landmarks) de la mano en tiempo real.
 4. Captura muestras: en modo estático cada pulsación de la tecla T guarda un
    cuadro normalizado; en modo dinámico la tecla T inicia y detiene la
-   grabación de una secuencia completa, que luego se remuestrea a una
-   longitud fija de 20 cuadros.
+   grabación de una secuencia completa de landmarks crudos (sin normalizar,
+   para preservar la trayectoria), que luego se remuestrea a una longitud
+   fija de 20 cuadros.
 5. Al terminar la sesión, las muestras se guardan como "capturas pendientes"
    y se presenta un resumen con una vista previa del promedio de landmarks.
 6. El usuario decide aceptar (integrar al dataset oficial y reentrenar el
@@ -687,10 +688,12 @@ class TeachSignScreen(QWidget):
         """
         if self.current_landmarks is None:
             return
-        # Normaliza los landmarks (independiente de posición/escala) y los
-        # acumula en la secuencia en curso.
-        normalized = normalize_single_hand(self.current_landmarks)[0].tolist()
-        self.frame_buffer.append(normalized)
+        # Guarda los landmarks CRUDOS (sin normalizar por frame): la
+        # normalización dependiente de trayectoria se aplica sobre la
+        # secuencia completa durante el entrenamiento (igual que en la
+        # inferencia), preservando el movimiento global de la mano.
+        raw_frame = [[float(coord) for coord in point] for point in self.current_landmarks]
+        self.frame_buffer.append(raw_frame)
         self._update_capture_status()
 
     def _get_predictive_landmarks(self, landmarks):
