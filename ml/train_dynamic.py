@@ -36,7 +36,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from core.preprocessing import normalize_landmarks
+from core.preprocessing import normalize_dynamic_sequences as _normalize_dynamic_sequences
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -119,13 +119,12 @@ def load_dynamic_dataset(filepath: Path):
 
 def normalize_dynamic_sequences(X: np.ndarray) -> np.ndarray:
     """
-    Normaliza todas las secuencias del dataset frame por frame.
+    Normaliza todas las secuencias del dataset preservando la trayectoria.
 
-    Estrategia: se "aplanan" las secuencias juntando todos los frames de todas
-    las muestras en un solo lote (N*T, 21, 3), se normaliza cada frame con el
-    mismo módulo centralizado que usa la inferencia (normalize_landmarks) y
-    luego se restaura la forma original (N, T, 21, 3). Así se garantiza que
-    entrenamiento e inferencia apliquen exactamente el mismo preprocesado.
+    Delega en el módulo centralizado (core.preprocessing), que ancla cada
+    secuencia a la muñeca de su primer frame y aplica una única escala a
+    todos los frames. Es el mismo preprocesado que usan TrainingService y
+    DynamicSignClassifier, por lo que entrenamiento e inferencia coinciden.
 
     Args:
         X: Array de secuencias con forma (N, T, 21, 3).
@@ -133,12 +132,7 @@ def normalize_dynamic_sequences(X: np.ndarray) -> np.ndarray:
     Returns:
         Array normalizado con la misma forma (N, T, 21, 3).
     """
-    # Aplanar la dimensión temporal para normalizar todos los frames en lote
-    samples, timesteps, points, coords = X.shape
-    X_flat = X.reshape(samples * timesteps, points, coords)
-    X_norm = normalize_landmarks(X_flat)
-    # Restaurar la estructura de secuencias original
-    return X_norm.reshape(samples, timesteps, points, coords)
+    return _normalize_dynamic_sequences(X)
 
 
 def create_dynamic_model(sequence_length: int, num_classes: int) -> tf.keras.Model:

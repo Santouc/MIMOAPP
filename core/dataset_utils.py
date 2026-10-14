@@ -305,4 +305,4 @@ if __name__ == "__main__":
     # Limpiar archivo de prueba
     Path("data/datasets/test_dataset.json").unlink()
     
-    print("\n✅ Prueba completada exitosamente")
+    print("\n Prueba completada exitosamente")

@@ -29,6 +29,7 @@ import tensorflow as tf
 from core.dataset_utils import load_dataset
 from core.preprocessing import normalize_landmarks, normalize_dynamic_sequences
 from ml.dynamic_classifier import NO_SIGN_LABEL
+from utils.atomic_io import atomic_write_json
 from .path_service import PathService
 
 
@@ -477,8 +478,7 @@ class TrainingService:
             path: ruta destino del archivo de labels.
             labels: nombres de las clases, en el orden usado por el modelo.
         """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(labels, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(path, labels)
 
     def _build_result(
         self,

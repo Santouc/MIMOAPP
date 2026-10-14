@@ -17,6 +17,7 @@ Los datasets son archivos JSON con claves "X" (muestras), "y" (índices de
 clase), "labels" (nombres de señas) y "metadata" (información descriptiva).
 """
 
+import copy
 import json
 import shutil
 from datetime import datetime
@@ -28,7 +29,13 @@ import numpy as np
 
 from .path_service import PathService
 from .sign_service import SignService
+from utils.atomic_io import atomic_write_json, atomic_write_text
 from visualization.landmark_average import average_dynamic_sequences, average_static_landmarks
+
+# Sufijo con el que se renombra la carpeta de una sesión en el instante de
+# confirmar su aceptación. El renombrado es atómico y marca el punto de no
+# retorno de la transacción; la carpeta renombrada se borra después.
+ACCEPTED_SESSION_SUFFIX = ".accepted"
 
 
 class CaptureService:
@@ -45,6 +52,7 @@ class CaptureService:
         self.paths = paths or PathService()
         self.sign_service = sign_service or SignService(self.paths)
         self.paths.ensure_app_dirs()
+        self._cleanup_accepted_sessions()
 
     def create_pending_session(self, sign_id: str, capture_type: str, samples: list[Any]) -> dict[str, Any]:
         """Crea una sesión de captura pendiente de revisión.
@@ -96,10 +104,10 @@ class CaptureService:
 
         # Persistir muestras y metadatos, y calcular el resumen con el
         # promedio de landmarks para la previsualización.
-        samples_path.write_text(json.dumps({"samples": samples}, ensure_ascii=False), encoding="utf-8")
-        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(samples_path, {"samples": samples}, indent=None)
+        atomic_write_json(metadata_path, metadata)
         summary = self.build_session_summary(session_dir)
-        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(summary_path, summary)
         return summary
 
     def list_pending_sessions(self) -> list[dict[str, Any]]:
@@ -112,9 +120,11 @@ class CaptureService:
         # Si nunca se creó la carpeta, no hay sesiones pendientes.
         if not self.paths.pending_captures_dir.exists():
             return sessions
-        # Recorrer cada subcarpeta de sesión y leer su metadata.json.
+        # Recorrer cada subcarpeta de sesión y leer su metadata.json. Las
+        # carpetas ocultas (sesiones ya confirmadas pendientes de borrado)
+        # no cuentan como pendientes.
         for session_dir in self.paths.pending_captures_dir.iterdir():
-            if not session_dir.is_dir():
+            if not session_dir.is_dir() or session_dir.name.startswith("."):
                 continue
             metadata_path = session_dir / "metadata.json"
             if metadata_path.exists():
@@ -148,9 +158,20 @@ class CaptureService:
     def accept_pending_session(self, session_id: str) -> dict[str, Any]:
         """Acepta una sesión pendiente: incorpora sus muestras al dataset.
 
-        Agrega las muestras al dataset estático o dinámico (según el tipo de
-        la sesión), actualiza los contadores de la seña y elimina la carpeta
-        de la sesión.
+        La operación es transaccional ("todo o nada"):
+
+        1. Se toma una copia en memoria del dataset y del registro de señas.
+        2. Se anexan las muestras al dataset y se actualizan los contadores.
+        3. Punto de confirmación: la carpeta de la sesión se renombra de
+           forma atómica a una carpeta oculta (`.<id>.accepted`), con lo que
+           deja de ser una sesión pendiente.
+        4. La carpeta renombrada se elimina (si falla, se limpia en el
+           siguiente arranque; la transacción ya está confirmada).
+
+        Si cualquier paso anterior al punto de confirmación falla, se
+        restauran el dataset y el registro desde las copias en memoria y se
+        relanza la excepción. Así, reintentar la aceptación es seguro y no
+        duplica muestras.
 
         Args:
             session_id: id de la sesión a aceptar.
@@ -170,17 +191,53 @@ class CaptureService:
         samples = json.loads((session_dir / "samples.json").read_text(encoding="utf-8"))["samples"]
         labels = self.sign_service.export_labels()
         label_index = labels.index(metadata["sign_name"])
+        is_static = metadata["capture_type"] == "static"
+        dataset_path = self.paths.static_dataset_path if is_static else self.paths.dynamic_dataset_path
 
-        # Anexar las muestras al dataset correspondiente según el tipo.
-        if metadata["capture_type"] == "static":
-            self._append_static_samples(samples, label_index, labels)
-        else:
-            self._append_dynamic_samples(samples, label_index, labels)
+        # 1. Copia de seguridad en memoria del estado original (bytes exactos
+        # del dataset, o None si aún no existe, y el registro de señas).
+        dataset_backup = dataset_path.read_text(encoding="utf-8") if dataset_path.exists() else None
+        registry_backup = copy.deepcopy(self.sign_service._load_registry())
+        accepted_dir = session_dir.with_name(f".{session_id}{ACCEPTED_SESSION_SUFFIX}")
 
-        # Refrescar los contadores de la seña y eliminar la sesión aceptada.
-        self._refresh_counts(metadata["sign_id"])
-        shutil.rmtree(session_dir)
+        try:
+            # 2. Anexar las muestras y refrescar contadores.
+            if is_static:
+                self._append_static_samples(samples, label_index, labels)
+            else:
+                self._append_dynamic_samples(samples, label_index, labels)
+            self._refresh_counts(metadata["sign_id"])
+            # 3. Punto de confirmación: renombrado atómico de la sesión.
+            session_dir.rename(accepted_dir)
+        except BaseException:
+            self._rollback_acceptance(dataset_path, dataset_backup, registry_backup)
+            raise
+
+        # 4. Limpieza posterior a la confirmación (best effort).
+        shutil.rmtree(accepted_dir, ignore_errors=True)
         return {**metadata, "status": "accepted"}
+
+    def _rollback_acceptance(self, dataset_path: Path, dataset_backup: str | None, registry_backup: dict[str, Any]) -> None:
+        """Restaura el dataset y el registro de señas a su estado previo.
+
+        Args:
+            dataset_path: ruta del dataset modificado.
+            dataset_backup: contenido original del dataset, o None si no existía.
+            registry_backup: copia del registro de señas original.
+        """
+        if dataset_backup is None:
+            dataset_path.unlink(missing_ok=True)
+        else:
+            atomic_write_text(dataset_path, dataset_backup)
+        self.sign_service._save_registry(registry_backup)
+
+    def _cleanup_accepted_sessions(self) -> None:
+        """Elimina carpetas de sesiones ya confirmadas cuyo borrado quedó a medias."""
+        if not self.paths.pending_captures_dir.exists():
+            return
+        for leftover in self.paths.pending_captures_dir.glob(f".*{ACCEPTED_SESSION_SUFFIX}"):
+            if leftover.is_dir():
+                shutil.rmtree(leftover, ignore_errors=True)
 
     def reject_pending_session(self, session_id: str) -> dict[str, Any]:
         """Rechaza una sesión pendiente: descarta sus muestras.
@@ -306,12 +363,12 @@ class CaptureService:
             label_index: índice de clase que les corresponde.
             labels: lista completa de etiquetas vigente.
         """
-        # Cargar el dataset actual, anexar las muestras con su etiqueta y
-        # actualizar las etiquetas y los metadatos antes de guardar.
+        # Cargar el dataset actual, remapear los índices históricos a las
+        # etiquetas vigentes, anexar las muestras y guardar.
         dataset = self._load_dataset(self.paths.static_dataset_path, labels)
+        self._remap_dataset_labels(dataset, labels)
         dataset["X"].extend(samples)
         dataset["y"].extend([label_index] * len(samples))
-        dataset["labels"] = labels
         dataset["metadata"] = self._metadata("static", len(dataset["X"]), labels)
         self._save_dataset(self.paths.static_dataset_path, dataset)
 
@@ -325,11 +382,41 @@ class CaptureService:
         """
         # Misma lógica que el caso estático pero sobre el dataset dinámico.
         dataset = self._load_dataset(self.paths.dynamic_dataset_path, labels)
+        self._remap_dataset_labels(dataset, labels)
         dataset["X"].extend(samples)
         dataset["y"].extend([label_index] * len(samples))
-        dataset["labels"] = labels
         dataset["metadata"] = self._metadata("dynamic", len(dataset["X"]), labels)
         self._save_dataset(self.paths.dynamic_dataset_path, dataset)
+
+    def _remap_dataset_labels(self, dataset: dict[str, Any], new_labels: list[str]) -> None:
+        """Alinea los índices de `dataset["y"]` con una nueva lista de etiquetas.
+
+        Cuando se agrega una seña cuyo nombre va alfabéticamente antes que
+        las existentes, la lista de etiquetas se reordena y los índices
+        históricos dejan de apuntar a la clase correcta. Este método
+        construye un mapa índice_viejo -> índice_nuevo a partir de los
+        nombres y reescribe todos los valores de "y" antes de sobrescribir
+        "labels". Las muestras cuya etiqueta ya no exista se descartan.
+
+        Args:
+            dataset: diccionario del dataset (se modifica in situ).
+            new_labels: lista de etiquetas vigente.
+        """
+        old_labels = list(dataset.get("labels", []))
+        if old_labels == list(new_labels):
+            dataset["labels"] = list(new_labels)
+            return
+        index_map = {old_idx: new_labels.index(name) for old_idx, name in enumerate(old_labels) if name in new_labels}
+        new_x, new_y = [], []
+        for sample, label_idx in zip(dataset.get("X", []), dataset.get("y", [])):
+            mapped = index_map.get(int(label_idx))
+            if mapped is None:
+                continue
+            new_x.append(sample)
+            new_y.append(mapped)
+        dataset["X"] = new_x
+        dataset["y"] = new_y
+        dataset["labels"] = list(new_labels)
 
     def _load_dataset(self, path: Path, labels: list[str]) -> dict[str, Any]:
         """Carga un dataset desde disco o devuelve uno vacío si no existe.
@@ -346,9 +433,8 @@ class CaptureService:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def _save_dataset(self, path: Path, dataset: dict[str, Any]) -> None:
-        """Guarda un dataset en disco en formato JSON legible."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(dataset, ensure_ascii=False, indent=2), encoding="utf-8")
+        """Guarda un dataset en disco en formato JSON legible (escritura atómica)."""
+        atomic_write_json(path, dataset)
 
     def _remove_from_dataset(self, path: Path, sign_name: str) -> int:
         """Elimina de un dataset todas las muestras de una seña.
@@ -407,9 +493,9 @@ class CaptureService:
         """
         if not path.exists():
             return
-        # Reemplazar etiquetas y refrescar los metadatos del dataset.
+        # Remapear índices, reemplazar etiquetas y refrescar los metadatos.
         dataset = json.loads(path.read_text(encoding="utf-8"))
-        dataset["labels"] = labels
+        self._remap_dataset_labels(dataset, labels)
         dataset["metadata"] = self._metadata(dataset.get("metadata", {}).get("type", "unknown"), len(dataset.get("X", [])), labels)
         self._save_dataset(path, dataset)
 

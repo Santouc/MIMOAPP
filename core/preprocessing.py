@@ -105,8 +105,14 @@ def normalize_dynamic_sequence(sequence: Union[np.ndarray, List[List[Tuple[float
     Así el modelo recibe tanto la forma de la mano como la ruta que recorre,
     de manera invariante a la posición inicial y a la distancia a la cámara.
 
+    IMPORTANTE: la entrada deben ser las coordenadas CRUDAS de MediaPipe
+    (relativas a la imagen). Si los frames llegan ya centrados en su propia
+    muñeca (normalize_landmarks frame a frame), la trayectoria se pierde de
+    forma irrecuperable. Captura, entrenamiento e inferencia deben pasar
+    por esta función una sola vez, sobre la secuencia completa.
+
     Args:
-        sequence: Array o lista shape (T, 21, 3)
+        sequence: Array o lista shape (T, 21, 3) con coordenadas crudas
 
     Returns:
         Array normalizado shape (T, 21, 3)
@@ -233,4 +239,4 @@ if __name__ == "__main__":
     print(f"\nSingle hand input shape: (1, 21, 3)")
     print(f"Single hand output shape: {normalized_single.shape}")
     
-    print("\n✅ Prueba completada exitosamente")
+    print("\n Prueba completada exitosamente")

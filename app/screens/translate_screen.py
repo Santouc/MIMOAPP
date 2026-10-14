@@ -20,8 +20,9 @@ en tiempo real. Su flujo de trabajo general es el siguiente:
    actual y estado del tracking) y presentación del fotograma en la interfaz.
 9. Notificación de los cambios de transcripción a las extensiones instaladas.
 
-La interfaz gráfica se construye con PySide6 (Qt) y utiliza un ``QTimer``
-para procesar fotogramas de forma periódica sin bloquear el hilo de la UI.
+La interfaz gráfica se construye con PySide6 (Qt). ``CameraWorker`` ejecuta
+la captura y MediaPipe en un hilo independiente; la clasificación y la
+presentación de resultados se realizan en el hilo de la UI.
 """
 
 import time
@@ -29,13 +30,13 @@ from collections import Counter, deque
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from app.app_context import AppContext
-from core.hand_detector import HandDetector
-from core.image_processor import ImageProcessor
+from app.camera_worker import CameraWorker
+from core.hand_detector import draw_hand_landmarks
 from ml.clasificador import SignClassifier
 from ml.dynamic_classifier import DynamicSignClassifier
 from app.widgets import TranscriptionCorrectionDialog
@@ -80,17 +81,10 @@ class TranslateScreen(QWidget):
         """
         super().__init__(parent)
         self.context = context
-        # Recursos de captura y detección: se crean al iniciar la cámara
-        # y se liberan al detenerla (por eso comienzan en None).
-        self.capture = None
-        self.hand_detector = None
-        self.image_processor = ImageProcessor()
+        # El worker crea y libera los recursos de captura y detección.
+        self.camera_worker = None
         self.static_classifier = None
         self.dynamic_classifier = None
-        # Temporizador de Qt que dispara el procesamiento de cada fotograma
-        # sin bloquear el hilo de la interfaz gráfica.
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._process_frame)
         # Buffers de consenso:
         # - sign_buffer: últimas predicciones estáticas (seña, confianza).
         # - dynamic_sequence: ventana deslizante de landmarks para el
@@ -129,19 +123,24 @@ class TranslateScreen(QWidget):
     def stop_camera(self) -> None:
         """Detiene la captura de video y libera los recursos asociados.
 
-        Detiene el temporizador de procesamiento, libera la cámara de
-        OpenCV y limpia el detector de manos de MediaPipe. Es seguro
-        llamarla aunque la cámara ya esté detenida.
+        El worker libera la cámara de OpenCV y el detector de MediaPipe.
+        Es seguro llamarla aunque la cámara ya esté detenida.
         """
-        self.timer.stop()
-        # Liberar la cámara de OpenCV si estaba abierta.
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-        # Cerrar los recursos internos de MediaPipe.
-        if self.hand_detector is not None:
-            self.hand_detector.cleanup()
-            self.hand_detector = None
+        if self.camera_worker is not None:
+            worker = self.camera_worker
+            self.camera_worker = None
+            try:
+                worker.frame_ready.disconnect(self._on_frame_ready)
+                worker.camera_failed.disconnect(self._on_camera_failed)
+                worker.stop()
+            except RuntimeError:
+                # El hilo ya terminó y Qt liberó el objeto (finished -> deleteLater).
+                pass
+
+    def _on_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is not None and worker is self.camera_worker:
+            self.camera_worker = None
 
     def _build_ui(self) -> None:
         """Construye todos los widgets y layouts de la pantalla.
@@ -229,30 +228,29 @@ class TranslateScreen(QWidget):
         """Inicia la captura de video y arranca el ciclo de traducción.
 
         Carga los clasificadores, reinicia la transcripción y los buffers,
-        abre la cámara con OpenCV (configurada a 640x480 y 30 FPS), crea el
-        detector de manos de MediaPipe y pone en marcha el temporizador que
-        procesa un fotograma cada 30 ms. Si la cámara no puede abrirse, se
-        informa al usuario con un cuadro de diálogo crítico.
+        e inicia el worker de cámara y MediaPipe. Si la cámara no puede
+        abrirse, informa al usuario mediante una señal de error.
         """
+        self.stop_camera()
         # Preparación previa: modelos, transcripción y buffers en limpio.
         self._load_classifiers()
         self.context.transcription.reset()
         self._reset_buffers()
-        # Captura de cámara con OpenCV: dispositivo 0 (cámara por defecto)
-        # con resolución y tasa de fotogramas solicitadas.
-        self.capture = cv2.VideoCapture(0)
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.capture.set(cv2.CAP_PROP_FPS, 30)
-        if not self.capture.isOpened():
-            self.capture = None
-            QMessageBox.critical(self, "Cámara no disponible", "No se pudo abrir la cámara.")
-            return
-        # Detector de landmarks de MediaPipe limitado a una sola mano y
-        # arranque del temporizador de procesamiento (~33 FPS máximo).
-        self.hand_detector = HandDetector(max_hands=1)
-        self.timer.start(30)
+        # El overlay (landmarks estabilizados + textos) lo dibuja esta pantalla,
+        # por eso el worker se crea sin dibujo propio.
+        self.camera_worker = CameraWorker(max_hands=1, draw_landmarks=False, parent=self)
+        self.camera_worker.frame_ready.connect(self._on_frame_ready)
+        self.camera_worker.camera_failed.connect(self._on_camera_failed)
+        self.camera_worker.finished.connect(self._on_worker_finished)
+        self.video_label.setText("Abriendo cámara...")
+        self.camera_worker.start()
         self.status_label.setText(self._model_status_text())
+
+    def _on_camera_failed(self, message: str) -> None:
+        self.stop_camera()
+        self.video_label.setText("Cámara detenida")
+        self.status_label.setText("Estado: cámara no disponible")
+        QMessageBox.critical(self, "Cámara no disponible", message)
 
     def _load_classifiers(self) -> None:
         """Carga (o recarga) los modelos de clasificación desde disco.
@@ -275,27 +273,20 @@ class TranslateScreen(QWidget):
             sequence_length=20,
         )
 
-    def _process_frame(self) -> None:
-        """Procesa un fotograma completo del pipeline de traducción.
+    def _on_frame_ready(self, frame, raw_landmarks: list) -> None:
+        # Slot en el hilo de la UI: la captura y MediaPipe ya ocurrieron en
+        # CameraWorker; aquí solo se estabiliza, se infiere, se dibuja el
+        # overlay y se pinta el pixmap.
+        worker = self.camera_worker
+        if worker is None:
+            return
+        try:
+            self._process_frame(frame, raw_landmarks or None)
+        finally:
+            worker.frame_consumed()
 
-        Es el corazón de la pantalla: se ejecuta periódicamente desde el
-        ``QTimer`` y encadena captura, detección, estabilización,
-        clasificación, transcripción y presentación. Si la cámara no está
-        activa o el fotograma no pudo leerse, retorna sin hacer nada.
-        """
-        if self.capture is None:
-            return
-        # Captura del fotograma desde la cámara con OpenCV.
-        ok, frame = self.capture.read()
-        if not ok:
-            return
-        # Espejar horizontalmente para que el video se comporte como un
-        # espejo (más natural para el usuario) y preprocesar la imagen.
-        frame = cv2.flip(frame, 1)
-        processed = self.image_processor.preprocess(frame)
-        # Detección de landmarks con MediaPipe y estabilización temporal
-        # para reducir el ruido entre fotogramas.
-        raw_landmarks = self.hand_detector.detect(processed) if self.hand_detector else None
+    def _process_frame(self, processed, raw_landmarks) -> None:
+        """Estabiliza, clasifica y presenta un fotograma recibido del worker."""
         landmarks = self._stabilize_landmarks(raw_landmarks)
 
         # Clasificación: se ejecutan en paralelo la rama estática y la
@@ -303,7 +294,7 @@ class TranslateScreen(QWidget):
         static_sign = None
         dynamic_sign = None
         if landmarks is not None:
-            processed = self.hand_detector.draw_landmarks(processed, landmarks)
+            processed = draw_hand_landmarks(processed, landmarks)
             self._update_motion_state(landmarks)
             static_sign = self._process_static_prediction(landmarks)
             dynamic_sign = self._process_dynamic_prediction(landmarks)

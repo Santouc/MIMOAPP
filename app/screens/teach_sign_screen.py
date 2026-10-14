@@ -26,7 +26,7 @@ de interpretación de transcripciones.
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -43,9 +43,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.app_context import AppContext
+from app.camera_worker import CameraWorker
 from app.widgets import LandmarkPreview, TranscriptionCorrectionDialog
-from core.hand_detector import HandDetector
-from core.image_processor import ImageProcessor
 from core.preprocessing import normalize_single_hand
 
 
@@ -79,15 +78,8 @@ class TeachSignScreen(QWidget):
         """
         super().__init__(parent)
         self.context = context
-        # Recursos de video: la cámara (cv2.VideoCapture) y el detector de
-        # manos de MediaPipe se crean solo cuando se inicia una sesión.
-        self.capture = None
-        self.hand_detector = None
-        self.image_processor = ImageProcessor()
-        # Temporizador que dispara el procesamiento de un cuadro de cámara
-        # aproximadamente cada 30 ms (~30 FPS).
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._process_frame)
+        # La cámara y MediaPipe se crean en el worker al iniciar una sesión.
+        self.camera_worker = None
         # Landmarks de la mano detectados en el cuadro actual (o predichos).
         self.current_landmarks = None
         # Muestras acumuladas en la sesión: cuadros normalizados (estáticas)
@@ -133,22 +125,27 @@ class TeachSignScreen(QWidget):
             self.status_label.setText("Selecciona una seña para capturar muestras o abre la vista previa general para probar correcciones.")
 
     def stop_camera(self) -> None:
-        """Detiene el temporizador y libera la cámara y el detector de manos.
+        """Detiene el worker que libera la cámara y el detector de manos.
 
         Es seguro llamarla varias veces: solo libera los recursos que sigan
         activos. Se usa al terminar/cancelar una sesión o al salir de la
         pantalla.
         """
-        # Detiene el bucle de procesamiento de cuadros.
-        self.timer.stop()
-        # Libera la cámara física para que otras aplicaciones puedan usarla.
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-        # Libera los recursos internos de MediaPipe.
-        if self.hand_detector is not None:
-            self.hand_detector.cleanup()
-            self.hand_detector = None
+        if self.camera_worker is not None:
+            worker = self.camera_worker
+            self.camera_worker = None
+            try:
+                worker.frame_ready.disconnect(self._on_frame_ready)
+                worker.camera_failed.disconnect(self._on_camera_failed)
+                worker.stop()
+            except RuntimeError:
+                # El hilo ya terminó y Qt liberó el objeto (finished -> deleteLater).
+                pass
+
+    def _on_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is not None and worker is self.camera_worker:
+            self.camera_worker = None
 
     def _build_ui(self) -> None:
         """Construye la estructura general de la pantalla.
@@ -339,42 +336,17 @@ class TeachSignScreen(QWidget):
     def _start_camera(self) -> None:
         """Inicia una sesión de captura de muestras para la seña elegida.
 
-        Valida que haya una seña seleccionada, reinicia todo el estado de la
-        sesión, abre la cámara con resolución 640x480 a 30 FPS, crea el
-        detector de manos (una sola mano) y arranca el bucle de cuadros.
-        Si la cámara no puede abrirse, informa el error y aborta.
+        Valida que haya una seña seleccionada y reinicia el estado de la
+        sesión. El worker abre la cámara y crea el detector de manos.
+        Si la cámara no puede abrirse, informa el error mediante una señal.
         """
-        self.preview_mode = False
         # Sin seña seleccionada no hay a qué asociar las muestras.
         sign_id = self.sign_combo.currentData()
         if not sign_id:
             QMessageBox.warning(self, "Sin seña", "Primero selecciona una seña.")
             return
-        # Reinicia por completo el estado de la sesión anterior.
-        self.samples = []
-        self.frame_buffer = []
-        self.is_dynamic_recording = False
-        self.last_dynamic_discard_reason = ""
-        self.last_valid_landmarks = None
-        self.missed_landmark_frames = 0
-        self.current_landmarks = None
-        self.pending_summary = None
-        self.pending_session_id = None
-        # Abre la cámara predeterminada y fija resolución y FPS deseados.
-        self.capture = cv2.VideoCapture(0)
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.capture.set(cv2.CAP_PROP_FPS, 30)
-        if not self.capture.isOpened():
-            self.capture = None
-            QMessageBox.critical(self, "Cámara no disponible", "No se pudo abrir la cámara.")
-            return
-        # Detector de MediaPipe limitado a una sola mano por consistencia.
-        self.hand_detector = HandDetector(max_hands=1)
-        # Cambia a la página de cámara y arranca el bucle (~30 FPS).
-        self.pages.setCurrentWidget(self.camera_page)
-        self.timer.start(30)
-        self._update_capture_status()
+        self._reset_capture_state(preview_mode=False)
+        self._launch_camera_worker()
 
     def _start_preview_camera(self) -> None:
         """Abre la cámara en modo vista previa general (sin guardar muestras).
@@ -383,7 +355,12 @@ class TeachSignScreen(QWidget):
         ``preview_mode`` activo: se puede observar la detección de landmarks
         y usar la corrección de interpretación, sin acumular capturas.
         """
-        self.preview_mode = True
+        self._reset_capture_state(preview_mode=True)
+        self.camera_title.setText("Vista previa general")
+        self._launch_camera_worker()
+
+    def _reset_capture_state(self, preview_mode: bool) -> None:
+        self.preview_mode = preview_mode
         # Limpia cualquier estado remanente de sesiones anteriores.
         self.samples = []
         self.frame_buffer = []
@@ -394,54 +371,36 @@ class TeachSignScreen(QWidget):
         self.current_landmarks = None
         self.pending_summary = None
         self.pending_session_id = None
-        # Abre la cámara con la misma configuración que la captura normal.
-        self.capture = cv2.VideoCapture(0)
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.capture.set(cv2.CAP_PROP_FPS, 30)
-        if not self.capture.isOpened():
-            self.capture = None
-            QMessageBox.critical(self, "Cámara no disponible", "No se pudo abrir la cámara.")
-            return
-        self.hand_detector = HandDetector(max_hands=1)
-        # Ajusta el título para dejar claro que no se están guardando datos.
-        self.camera_title.setText("Vista previa general")
+
+    def _launch_camera_worker(self) -> None:
+        self.stop_camera()
+        self.camera_worker = CameraWorker(max_hands=1, parent=self)
+        self.camera_worker.frame_ready.connect(self._on_frame_ready)
+        self.camera_worker.camera_failed.connect(self._on_camera_failed)
+        self.camera_worker.finished.connect(self._on_worker_finished)
+        self.camera_label.setText("Abriendo cámara...")
         self.pages.setCurrentWidget(self.camera_page)
-        self.timer.start(30)
+        self.camera_worker.start()
         self._update_capture_status()
 
-    def _process_frame(self) -> None:
-        """Procesa un cuadro de la cámara en cada tick del temporizador.
+    def _on_camera_failed(self, message: str) -> None:
+        self.stop_camera()
+        QMessageBox.critical(self, "Cámara no disponible", message)
+        self.pages.setCurrentWidget(self.setup_page)
 
-        Pasos del pipeline por cuadro:
-        1. Lee el cuadro y lo refleja horizontalmente (efecto espejo).
-        2. Lo preprocesa con ``ImageProcessor`` (mejora para la detección).
-        3. Detecta landmarks de la mano y aplica el suavizado predictivo.
-        4. Dibuja los landmarks sobre la imagen a mostrar.
-        5. Si hay una grabación dinámica activa, agrega el cuadro al buffer.
-        6. Muestra la imagen resultante en la interfaz.
-        """
-        # Si la cámara fue liberada o el cuadro falla, no hay nada que hacer.
-        if self.capture is None:
+    def _on_frame_ready(self, frame, landmarks: list) -> None:
+        # Este slot corre en el hilo de la UI: solo guarda landmarks en memoria
+        # y pinta el frame; la captura y la detección ocurren en CameraWorker.
+        worker = self.camera_worker
+        if worker is None:
             return
-        ok, frame = self.capture.read()
-        if not ok:
-            return
-        # Espejo horizontal para que el movimiento se sienta natural.
-        frame = cv2.flip(frame, 1)
-        # Preprocesado de imagen y detección de landmarks de la mano.
-        processed = self.image_processor.preprocess(frame)
-        landmarks = self.hand_detector.detect(processed) if self.hand_detector else None
-        # Suavizado predictivo: tolera pérdidas breves de detección.
-        self.current_landmarks = self._get_predictive_landmarks(landmarks)
-        # Dibuja el esqueleto de la mano sobre la copia que se mostrará.
-        display = processed.copy()
-        if landmarks:
-            display = self.hand_detector.draw_landmarks(display, landmarks)
-        # Durante una grabación dinámica, cada cuadro se acumula en el buffer.
-        if self.type_combo.currentData() == "dynamic" and self.is_dynamic_recording:
-            self._record_dynamic_frame()
-        self._show_frame(display)
+        try:
+            self.current_landmarks = self._get_predictive_landmarks(landmarks)
+            if self.type_combo.currentData() == "dynamic" and self.is_dynamic_recording:
+                self._record_dynamic_frame()
+            self._show_frame(frame)
+        finally:
+            worker.frame_consumed()
 
     def _show_frame(self, frame) -> None:
         """Convierte un cuadro BGR de OpenCV y lo pinta en la interfaz.
@@ -683,7 +642,7 @@ class TeachSignScreen(QWidget):
     def _record_dynamic_frame(self) -> None:
         """Agrega el cuadro actual de landmarks al buffer de la secuencia.
 
-        Se llama en cada tick del temporizador mientras la grabación
+        Se llama al recibir un fotograma del worker mientras la grabación
         dinámica está activa. Si no hay mano detectada, el cuadro se omite.
         """
         if self.current_landmarks is None:
@@ -738,8 +697,8 @@ class TeachSignScreen(QWidget):
             return None
         first = landmarks[0]
         # Una mano válida debe tener exactamente 21 puntos de referencia.
-        if isinstance(first, list) and len(first) == 21:
-            return first
+        if isinstance(first, (list, tuple)) and len(first) == 21:
+            return list(first)
         return None
 
     def _pad_or_truncate(self, sequence: list, target_length: int) -> list:

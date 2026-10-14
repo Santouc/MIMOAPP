@@ -22,6 +22,7 @@ from typing import Any
 from uuid import uuid4
 
 from .path_service import PathService
+from utils.atomic_io import atomic_write_json
 
 
 class SignService:
@@ -211,12 +212,10 @@ class SignService:
         """
         # Obtener los nombres en el mismo orden que usa list_signs().
         labels = [sign["name"] for sign in self.list_signs()]
-        # Asegurar que las carpetas destino existan antes de escribir.
-        self.paths.static_labels_path.parent.mkdir(parents=True, exist_ok=True)
-        self.paths.dynamic_labels_path.parent.mkdir(parents=True, exist_ok=True)
-        # Guardar las etiquetas como JSON legible (UTF-8, con tildes intactas).
-        self.paths.static_labels_path.write_text(json.dumps(labels, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.paths.dynamic_labels_path.write_text(json.dumps(labels, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Guardar las etiquetas como JSON legible (UTF-8, con tildes intactas)
+        # mediante escritura atómica.
+        atomic_write_json(self.paths.static_labels_path, labels)
+        atomic_write_json(self.paths.dynamic_labels_path, labels)
         return labels
 
     def reset_registry(self) -> None:
@@ -250,10 +249,8 @@ class SignService:
         Args:
             data: diccionario completo del registro a persistir.
         """
-        # Garantizar que la carpeta exista y escribir el JSON con indentación.
-        self.paths.signs_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.paths.signs_path.open("w", encoding="utf-8") as file:
-            json.dump(data, file, ensure_ascii=False, indent=2)
+        # Escribir el JSON con indentación de forma atómica.
+        atomic_write_json(self.paths.signs_path, data)
 
     def _build_sign_id(self, name: str) -> str:
         """Genera un id "slug" a partir del nombre de la seña.

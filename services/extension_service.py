@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .path_service import PathService
+from utils.atomic_io import atomic_write_json
 
 
 @dataclass
@@ -359,11 +360,7 @@ class ExtensionService:
 
     def _save_config(self) -> None:
         """Persiste en disco el conjunto de extensiones deshabilitadas."""
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(
-            json.dumps({"disabled": sorted(self._disabled)}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(self.config_path, {"disabled": sorted(self._disabled)})
 
     def _import_module(self, folder_name: str, entry_path):
         """Importa dinámicamente el módulo `extension.py` de una carpeta.
