@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,9 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.app_context import AppContext
+from app.camera_worker import CameraWorker
 from app.widgets import LandmarkPreview, TranscriptionCorrectionDialog
-from core.hand_detector import HandDetector
-from core.image_processor import ImageProcessor
 from core.preprocessing import normalize_single_hand
 
 
@@ -29,11 +28,7 @@ class TeachSignScreen(QWidget):
     def __init__(self, context: AppContext, parent=None):
         super().__init__(parent)
         self.context = context
-        self.capture = None
-        self.hand_detector = None
-        self.image_processor = ImageProcessor()
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._process_frame)
+        self.camera_worker = None
         self.current_landmarks = None
         self.samples = []
         self.frame_buffer = []
@@ -60,13 +55,21 @@ class TeachSignScreen(QWidget):
             self.status_label.setText("Selecciona una seña para capturar muestras o abre la vista previa general para probar correcciones.")
 
     def stop_camera(self) -> None:
-        self.timer.stop()
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-        if self.hand_detector is not None:
-            self.hand_detector.cleanup()
-            self.hand_detector = None
+        if self.camera_worker is not None:
+            worker = self.camera_worker
+            self.camera_worker = None
+            try:
+                worker.frame_ready.disconnect(self._on_frame_ready)
+                worker.camera_failed.disconnect(self._on_camera_failed)
+                worker.stop()
+            except RuntimeError:
+                # El hilo ya terminó y Qt liberó el objeto (finished -> deleteLater).
+                pass
+
+    def _on_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is not None and worker is self.camera_worker:
+            self.camera_worker = None
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -203,35 +206,20 @@ class TeachSignScreen(QWidget):
         return page
 
     def _start_camera(self) -> None:
-        self.preview_mode = False
         sign_id = self.sign_combo.currentData()
         if not sign_id:
             QMessageBox.warning(self, "Sin seña", "Primero selecciona una seña.")
             return
-        self.samples = []
-        self.frame_buffer = []
-        self.is_dynamic_recording = False
-        self.last_dynamic_discard_reason = ""
-        self.last_valid_landmarks = None
-        self.missed_landmark_frames = 0
-        self.current_landmarks = None
-        self.pending_summary = None
-        self.pending_session_id = None
-        self.capture = cv2.VideoCapture(0)
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.capture.set(cv2.CAP_PROP_FPS, 30)
-        if not self.capture.isOpened():
-            self.capture = None
-            QMessageBox.critical(self, "Cámara no disponible", "No se pudo abrir la cámara.")
-            return
-        self.hand_detector = HandDetector(max_hands=1)
-        self.pages.setCurrentWidget(self.camera_page)
-        self.timer.start(30)
-        self._update_capture_status()
+        self._reset_capture_state(preview_mode=False)
+        self._launch_camera_worker()
 
     def _start_preview_camera(self) -> None:
-        self.preview_mode = True
+        self._reset_capture_state(preview_mode=True)
+        self.camera_title.setText("Vista previa general")
+        self._launch_camera_worker()
+
+    def _reset_capture_state(self, preview_mode: bool) -> None:
+        self.preview_mode = preview_mode
         self.samples = []
         self.frame_buffer = []
         self.is_dynamic_recording = False
@@ -241,36 +229,36 @@ class TeachSignScreen(QWidget):
         self.current_landmarks = None
         self.pending_summary = None
         self.pending_session_id = None
-        self.capture = cv2.VideoCapture(0)
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.capture.set(cv2.CAP_PROP_FPS, 30)
-        if not self.capture.isOpened():
-            self.capture = None
-            QMessageBox.critical(self, "Cámara no disponible", "No se pudo abrir la cámara.")
-            return
-        self.hand_detector = HandDetector(max_hands=1)
-        self.camera_title.setText("Vista previa general")
+
+    def _launch_camera_worker(self) -> None:
+        self.stop_camera()
+        self.camera_worker = CameraWorker(max_hands=1, parent=self)
+        self.camera_worker.frame_ready.connect(self._on_frame_ready)
+        self.camera_worker.camera_failed.connect(self._on_camera_failed)
+        self.camera_worker.finished.connect(self._on_worker_finished)
+        self.camera_label.setText("Abriendo cámara...")
         self.pages.setCurrentWidget(self.camera_page)
-        self.timer.start(30)
+        self.camera_worker.start()
         self._update_capture_status()
 
-    def _process_frame(self) -> None:
-        if self.capture is None:
+    def _on_camera_failed(self, message: str) -> None:
+        self.stop_camera()
+        QMessageBox.critical(self, "Cámara no disponible", message)
+        self.pages.setCurrentWidget(self.setup_page)
+
+    def _on_frame_ready(self, frame, landmarks: list) -> None:
+        # Este slot corre en el hilo de la UI: solo guarda landmarks en memoria
+        # y pinta el frame; la captura y la detección ocurren en CameraWorker.
+        worker = self.camera_worker
+        if worker is None:
             return
-        ok, frame = self.capture.read()
-        if not ok:
-            return
-        frame = cv2.flip(frame, 1)
-        processed = self.image_processor.preprocess(frame)
-        landmarks = self.hand_detector.detect(processed) if self.hand_detector else None
-        self.current_landmarks = self._get_predictive_landmarks(landmarks)
-        display = processed.copy()
-        if landmarks:
-            display = self.hand_detector.draw_landmarks(display, landmarks)
-        if self.type_combo.currentData() == "dynamic" and self.is_dynamic_recording:
-            self._record_dynamic_frame()
-        self._show_frame(display)
+        try:
+            self.current_landmarks = self._get_predictive_landmarks(landmarks)
+            if self.type_combo.currentData() == "dynamic" and self.is_dynamic_recording:
+                self._record_dynamic_frame()
+            self._show_frame(frame)
+        finally:
+            worker.frame_consumed()
 
     def _show_frame(self, frame) -> None:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -423,8 +411,11 @@ class TeachSignScreen(QWidget):
     def _record_dynamic_frame(self) -> None:
         if self.current_landmarks is None:
             return
-        normalized = normalize_single_hand(self.current_landmarks)[0].tolist()
-        self.frame_buffer.append(normalized)
+        # Se guardan las coordenadas crudas (relativas a la imagen) sin centrar:
+        # la normalización dinámica se aplica después sobre la secuencia completa
+        # para conservar la trayectoria de la mano.
+        raw = np.asarray(self.current_landmarks, dtype=np.float32).tolist()
+        self.frame_buffer.append(raw)
         self._update_capture_status()
 
     def _get_predictive_landmarks(self, landmarks):
@@ -443,8 +434,8 @@ class TeachSignScreen(QWidget):
         if not landmarks or not isinstance(landmarks, list):
             return None
         first = landmarks[0]
-        if isinstance(first, list) and len(first) == 21:
-            return first
+        if isinstance(first, (list, tuple)) and len(first) == 21:
+            return list(first)
         return None
 
     def _pad_or_truncate(self, sequence: list, target_length: int) -> list:

@@ -1,3 +1,22 @@
+"""Pantalla de gestión del catálogo de señas de MIMO (T.L.S).
+
+Define :class:`ManageSignsScreen`, que permite administrar el registro de
+señas de la aplicación:
+
+- Agregar nuevas señas o frases indicando su tipo (estática y/o dinámica).
+- Importar de golpe la librería del alfabeto occidental (letras A-Z).
+- Ver en una tabla el nombre, tipo, cantidad de muestras y fecha de
+  actualización de cada seña.
+- Eliminar señas seleccionadas "de raíz" (registro, muestras, labels) con
+  doble confirmación y reentrenamiento automático de los modelos.
+- Resetear por completo todos los datos de la aplicación (señas, datasets,
+  labels y modelos) con una confirmación escrita.
+
+La lógica de datos vive en los servicios del contexto (signs, captures,
+libraries, training); esta pantalla se encarga de la interfaz y de las
+confirmaciones de seguridad.
+"""
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -21,16 +40,38 @@ from app.app_context import AppContext
 
 
 class ManageSignsScreen(QWidget):
+    """Pantalla para agregar, listar, eliminar y resetear señas.
+
+    Señales:
+        back_requested: se emite cuando el usuario pulsa "Volver al inicio".
+    """
+
+    # Señal de navegación para regresar al menú principal.
     back_requested = Signal()
 
     def __init__(self, context: AppContext, parent=None):
+        """Inicializa la pantalla, construye la interfaz y carga las señas.
+
+        Args:
+            context: contexto de aplicación con los servicios necesarios.
+            parent: widget padre opcional (convención de Qt).
+        """
         super().__init__(parent)
         self.context = context
+        # Copia local de la lista de señas mostrada en la tabla; se usa para
+        # mapear filas seleccionadas a señas concretas.
         self._signs = []
         self._build_ui()
         self.refresh()
 
     def refresh(self) -> None:
+        """Recarga la lista de señas desde el servicio y repuebla la tabla.
+
+        Cada fila muestra: nombre, tipos (estática/dinámica), cantidad de
+        muestras de cada tipo y fecha de última actualización. Al final
+        actualiza el contador de señas registradas.
+        """
+        # Consulta el registro actual de señas y ajusta el número de filas.
         self._signs = self.context.signs.list_signs()
         self.table.setRowCount(len(self._signs))
         for row, sign in enumerate(self._signs):
@@ -42,15 +83,20 @@ class ManageSignsScreen(QWidget):
         self.status_label.setText(f"Señas registradas: {len(self._signs)}")
 
     def _build_ui(self) -> None:
+        """Construye la interfaz: formulario de alta, tabla y acciones."""
+        # Layout principal vertical de la pantalla.
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
+        # Encabezado con título y descripción de la pantalla.
         title = QLabel("Gestionar señas")
         title.setObjectName("TitleLabel")
         description = QLabel("Agrega frases o señas, revisa sus muestras y elimina de raíz cualquier seña que ya no quieras conservar.")
         description.setObjectName("BodyLabel")
         description.setWordWrap(True)
 
+        # Formulario de alta: nombre de la seña, casillas de tipo
+        # (estática/dinámica) y botón para registrarla.
         form_layout = QHBoxLayout()
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("Nombre de la seña o frase")
@@ -63,6 +109,8 @@ class ManageSignsScreen(QWidget):
         form_layout.addWidget(self.dynamic_checkbox)
         form_layout.addWidget(add_button)
 
+        # Tabla de señas registradas: solo lectura, con selección múltiple
+        # por filas para permitir eliminar varias señas a la vez.
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Seña", "Tipo", "Muestras estáticas", "Muestras dinámicas", "Actualizada"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -74,6 +122,8 @@ class ManageSignsScreen(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
 
+        # Barra de acciones: refrescar, importar alfabeto, eliminar
+        # seleccionadas, reset total y volver al inicio.
         actions_layout = QHBoxLayout()
         refresh_button = QPushButton("Actualizar lista")
         alphabet_button = QPushButton("Agregar alfabeto occidental")
@@ -92,9 +142,11 @@ class ManageSignsScreen(QWidget):
         actions_layout.addStretch(1)
         actions_layout.addWidget(back_button)
 
+        # Etiqueta de estado con el total de señas registradas.
         self.status_label = QLabel()
         self.status_label.setObjectName("BodyLabel")
 
+        # Composición final del layout; la tabla ocupa el espacio sobrante.
         layout.addWidget(title)
         layout.addWidget(description)
         layout.addLayout(form_layout)
@@ -103,18 +155,28 @@ class ManageSignsScreen(QWidget):
         layout.addWidget(self.status_label)
 
     def _add_sign(self) -> None:
+        """Registra una nueva seña con el nombre y tipos indicados.
+
+        Lee el formulario (nombre y casillas estática/dinámica), delega el
+        alta al servicio de señas y exporta las labels actualizadas. Si el
+        servicio rechaza los datos (por ejemplo, nombre vacío o duplicado),
+        muestra el error sin modificar nada.
+        """
+        # Recolecta los datos del formulario.
         name = self.name_input.text().strip()
         sign_types = []
         if self.static_checkbox.isChecked():
             sign_types.append("static")
         if self.dynamic_checkbox.isChecked():
             sign_types.append("dynamic")
+        # Intenta registrar la seña y actualizar las labels exportadas.
         try:
             sign = self.context.signs.add_sign(name, sign_types)
             self.context.signs.export_labels()
         except ValueError as error:
             QMessageBox.warning(self, "No se pudo agregar", str(error))
             return
+        # Limpia el formulario y refresca la tabla tras el alta exitosa.
         self.name_input.clear()
         self.static_checkbox.setChecked(False)
         self.dynamic_checkbox.setChecked(False)

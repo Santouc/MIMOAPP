@@ -2,6 +2,22 @@
 """
 Script de entrenamiento para modelo de reconocimiento de señas
 Genera model.h5 y labels.json para el sistema de inferencia
+
+Este script entrena el modelo de señas ESTÁTICAS (posturas fijas de la mano,
+como la mayoría de las letras del alfabeto dactilológico). A diferencia del
+modelo dinámico (ml/train_dynamic.py), aquí cada muestra es un único frame
+de 21 landmarks 3D de MediaPipe, sin componente temporal.
+
+Flujo general:
+1. Cargar el dataset estático (dataset_static.json o dataset_final.json)
+   mediante el cargador centralizado de core.dataset_utils.
+2. Validar que existan al menos 2 clases distintas.
+3. Normalizar los landmarks con core.preprocessing (mismo preprocesado que
+   usa la inferencia en ml/clasificador.py).
+4. Construir y entrenar una red neuronal densa (MLP) en Keras.
+5. Guardar los artefactos: data/models/model.h5 y data/models/labels.json.
+
+Se ejecuta directamente desde consola: py ml/train.py
 """
 
 import numpy as np
@@ -9,8 +25,12 @@ import tensorflow as tf
 from pathlib import Path
 import sys
 
+# Raíz del proyecto (carpeta padre de ml/), necesaria para resolver rutas
+# de datos y para poder importar los paquetes core/ y utils/
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Agregar la raíz del proyecto al path de Python si aún no está,
+# de modo que el script funcione al ejecutarse directamente desde consola
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
@@ -29,7 +49,18 @@ def create_model(num_classes: int) -> tf.keras.Model:
         
     Returns:
         Modelo TensorFlow
+
+    Arquitectura (de entrada a salida):
+    - Input (21, 3): un frame con 21 landmarks 3D de la mano (MediaPipe).
+    - Dense(64, ReLU) aplicada punto a punto: extrae características de cada landmark.
+    - Flatten: aplana la representación para las capas globales.
+    - Dense(128, ReLU): combina la información de todos los landmarks.
+    - Dense(num_classes, softmax): distribución de probabilidad sobre las señas.
+
+    Se compila con Adam y sparse_categorical_crossentropy (las etiquetas
+    llegan como índices enteros, no en one-hot).
     """
+    # Entrada: un único frame de landmarks (sin componente temporal)
     inputs = tf.keras.Input(shape=(21, 3))
     
     # Capas densas
@@ -42,6 +73,8 @@ def create_model(num_classes: int) -> tf.keras.Model:
     
     model = tf.keras.Model(inputs, outputs)
     
+    # Compilar el modelo: optimizador Adam y entropía cruzada para
+    # etiquetas enteras, midiendo la exactitud durante el entrenamiento
     model.compile(
         optimizer='adam',
         loss='sparse_categorical_crossentropy',
@@ -58,6 +91,13 @@ def train_model(X: np.ndarray, y: np.ndarray, labels: list):
         X: Datos de entrenamiento
         y: Etiquetas de entrenamiento
         labels: Lista de nombres de clases
+
+    Returns:
+        Tupla (model, history) con el modelo entrenado y el historial de Keras.
+
+    Artefactos generados en disco:
+        - data/models/model.h5: pesos y arquitectura del modelo.
+        - data/models/labels.json: nombres de clases en el orden de la softmax.
     """
     logger.info("Iniciando entrenamiento del modelo...")
     
@@ -79,20 +119,20 @@ def train_model(X: np.ndarray, y: np.ndarray, labels: list):
         verbose=1
     )
     
-    # Guardar modelo
+    # Guardar modelo (crear la carpeta de destino si no existe)
     model_path = "data/models/model.h5"
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
     model.save(model_path)
     logger.info(f"Modelo guardado en {model_path}")
     
-    # Guardar etiquetas
+    # Guardar etiquetas en el mismo orden que las salidas del modelo
     labels_path = "data/models/labels.json"
     with open(labels_path, 'w') as f:
         import json
         json.dump(labels, f, indent=2)
     logger.info(f"Etiquetas guardadas en {labels_path}")
     
-    # Mostrar resultados
+    # Mostrar resultados finales del entrenamiento (última época)
     final_accuracy = history.history['accuracy'][-1]
     final_val_accuracy = history.history['val_accuracy'][-1]
     
@@ -103,9 +143,17 @@ def train_model(X: np.ndarray, y: np.ndarray, labels: list):
     return model, history
 
 def main():
-    """Función principal de entrenamiento"""
+    """
+    Función principal de entrenamiento
+
+    Orquesta el flujo completo: localizar el dataset (con ruta de respaldo),
+    validar que haya al menos 2 clases, normalizar los landmarks y entrenar.
+    Los errores se capturan, se registran en el log y se informan por consola
+    sin propagar la excepción.
+    """
     try:
-        # Cargar dataset
+        # Cargar dataset: se prueba primero dataset_static.json y, si no
+        # existe, se usa dataset_final.json como respaldo
         dataset_path = BASE_DIR / "data" / "datasets" / "dataset_static.json"
         if not dataset_path.exists():
             dataset_path = BASE_DIR / "data" / "datasets" / "dataset_final.json"
@@ -116,6 +164,8 @@ def main():
             )
         X, y, labels = load_dataset_centralized(str(dataset_path))
         
+        # Validar que el dataset tenga al menos 2 clases distintas:
+        # con una sola clase no es posible entrenar un clasificador
         unique_classes = np.unique(y)
         if len(unique_classes) < 2:
             class_name = labels[int(unique_classes[0])] if len(unique_classes) == 1 and int(unique_classes[0]) < len(labels) else "desconocida"
@@ -137,6 +187,7 @@ def main():
         print(f"   Classes: {labels}")
         
     except Exception as e:
+        # Registrar y mostrar el error de forma amigable
         logger.error(f"Error en entrenamiento: {e}")
         print(f"Training failed: {e}")
 

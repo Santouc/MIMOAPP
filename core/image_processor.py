@@ -2,12 +2,25 @@
 """
 Módulo de procesamiento de imágenes con OpenCV
 Responsable del preprocesamiento y postprocesamiento de imágenes
+
+Este módulo ofrece utilidades de visión por computadora basadas en OpenCV:
+- Preprocesamiento de frames de cámara (redimensionado, suavizado Gaussiano,
+  mejora de contraste con CLAHE y normalización de iluminación).
+- Detección de regiones de piel mediante umbrales en el espacio de color HSV.
+- Extracción de la región de interés (ROI) de la mano a partir de landmarks.
+- Detección de bordes (Canny), overlays de texto informativo y redimensionado
+  que conserva la relación de aspecto.
+
+Estas operaciones mejoran la calidad de la imagen antes de pasarla al
+detector de manos de MediaPipe y ayudan a la visualización en la interfaz.
 """
 
 import cv2
 import numpy as np
 from typing import Tuple, Optional
 
+# Clase de utilidades de imagen: agrupa todo el pipeline de mejora visual
+# que se aplica a los frames de la cámara antes y después de la detección.
 class ImageProcessor:
     """Procesador de imágenes usando OpenCV"""
     
@@ -18,7 +31,10 @@ class ImageProcessor:
         Args:
             target_size: Tamaño objetivo para las imágenes (ancho, alto)
         """
+        # Dimensiones objetivo a las que se ajustarán los frames
         self.target_width, self.target_height = target_size
+        # Umbrales HSV (tono, saturación, valor) que delimitan tonos de piel;
+        # se usan en detect_skin_region para crear la máscara binaria
         self.skin_lower = np.array([0, 20, 70], dtype=np.uint8)
         self.skin_upper = np.array([20, 255, 255], dtype=np.uint8)
         
@@ -51,6 +67,7 @@ class ImageProcessor:
             return frame_normalized
             
         except Exception as e:
+            # Ante cualquier fallo se devuelve el frame original sin procesar
             print(f"Error en preprocesamiento: {e}")
             return frame
     
@@ -65,6 +82,8 @@ class ImageProcessor:
             Frame con contraste mejorado
         """
         # Convertir a LAB color space
+        # (el canal L representa la luminosidad; mejorar solo ese canal
+        # aumenta el contraste sin distorsionar los colores)
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
         
@@ -90,6 +109,8 @@ class ImageProcessor:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         # Crear máscara de iluminación
+        # (un desenfoque muy amplio estima la iluminación de fondo; al dividir
+        # la imagen entre esa estimación se compensan sombras y luces desiguales)
         blur = cv2.GaussianBlur(gray, (101, 101), 0)
         mask = cv2.divide(gray, blur, scale=255.0)
         
@@ -118,6 +139,8 @@ class ImageProcessor:
             skin_mask = cv2.inRange(hsv, self.skin_lower, self.skin_upper)
             
             # Aplicar operaciones morfológicas para limpiar la máscara
+            # (apertura elimina puntos aislados de ruido; cierre rellena
+            # pequeños huecos dentro de las regiones de piel)
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
             skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_OPEN, kernel)
             skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_CLOSE, kernel)
@@ -142,6 +165,7 @@ class ImageProcessor:
             ROI de la mano, o None si hay error
         """
         try:
+            # Validar que se recibieron los 21 landmarks de MediaPipe
             if not landmarks or len(landmarks) != 21:
                 return None
             
@@ -155,6 +179,8 @@ class ImageProcessor:
                 pixel_coords.append((px, py))
             
             # Encontrar bounding box
+            # (rectángulo mínimo que contiene todos los landmarks, ampliado
+            # con el padding y recortado a los límites del frame)
             x_coords = [coord[0] for coord in pixel_coords]
             y_coords = [coord[1] for coord in pixel_coords]
             
@@ -214,6 +240,7 @@ class ImageProcessor:
         Returns:
             Frame con overlay de información
         """
+        # Trabajar sobre una copia para mezclarla luego con el frame original
         overlay = frame.copy()
         
         # Crear fondo semitransparente para el texto
@@ -248,6 +275,8 @@ class ImageProcessor:
         target_w, target_h = target_size
         
         # Calcular escala
+        # (se usa el factor mínimo para que la imagen quepa completa
+        # dentro del tamaño objetivo sin deformarse)
         scale = min(target_w / w, target_h / h)
         new_w = int(w * scale)
         new_h = int(h * scale)

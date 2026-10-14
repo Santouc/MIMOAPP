@@ -2,6 +2,15 @@
 """
 Módulo de detección de manos usando MediaPipe
 Responsable de detectar landmarks de manos en tiempo real
+
+Este módulo encapsula la API de MediaPipe Tasks (HandLandmarker) para:
+- Detectar hasta N manos en un frame de video (formato BGR de OpenCV).
+- Extraer los 21 landmarks 3D normalizados de cada mano detectada.
+- Dibujar los landmarks y sus conexiones sobre el frame para visualización.
+- Determinar heurísticamente qué dedos están extendidos.
+
+Incluye además un modo de "fallback" simulado que genera landmarks fijos
+con forma de mano, útil para pruebas cuando MediaPipe no está disponible.
 """
 
 import cv2
@@ -16,6 +25,70 @@ except ImportError:
     print("MediaPipe no está instalado")
     mp = None
 
+# Conexiones de la mano según MediaPipe (pares de índices de landmarks).
+HAND_CONNECTIONS = [
+    # Pulgar
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    # Índice
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    # Medio
+    (5, 9), (9, 10), (10, 11), (11, 12),
+    # Anular
+    (9, 13), (13, 14), (14, 15), (15, 16),
+    # Meñique
+    (13, 17), (17, 18), (18, 19), (19, 20),
+    # Conexión muñeca-meñique
+    (0, 17)
+]
+
+
+def draw_hand_landmarks(frame: np.ndarray, landmarks_list: List[List[Tuple[float, float, float]]]) -> np.ndarray:
+    """
+    Dibuja los landmarks (puntos, índices y conexiones) sobre una copia del frame.
+
+    Es una función independiente del detector para poder dibujar landmarks
+    ya procesados (por ejemplo, estabilizados) sin necesitar una instancia de
+    HandDetector ni de MediaPipe.
+
+    Args:
+        frame: Frame original en formato BGR
+        landmarks_list: Lista de manos; cada mano es una lista de 21 (x, y, z) normalizados
+
+    Returns:
+        Frame anotado (o el frame original si no hay landmarks)
+    """
+    # Si no hay manos detectadas, devolver el frame sin modificar
+    if not landmarks_list:
+        return frame
+
+    annotated_frame = frame.copy()
+    h, w = frame.shape[:2]
+
+    for landmarks in landmarks_list:
+        # Convertir landmarks normalizados a coordenadas de píxeles
+        pixel_landmarks = [(int(x * w), int(y * h)) for x, y, z in landmarks]
+
+        # Dibujar puntos
+        for i, (px, py) in enumerate(pixel_landmarks):
+            cv2.circle(annotated_frame, (px, py), 5, (0, 255, 0), -1)
+            cv2.putText(annotated_frame, str(i), (px + 8, py - 8),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
+
+        # Dibujar conexiones
+        _draw_connections(annotated_frame, pixel_landmarks)
+
+    return annotated_frame
+
+
+def _draw_connections(frame: np.ndarray, landmarks: List[Tuple[int, int]]) -> None:
+    """Dibuja una línea azul por cada par de landmarks conectados."""
+    for start_idx, end_idx in HAND_CONNECTIONS:
+        if start_idx < len(landmarks) and end_idx < len(landmarks):
+            cv2.line(frame, landmarks[start_idx], landmarks[end_idx], (255, 0, 0), 2)
+
+
+# Clase principal de detección: envuelve el HandLandmarker de MediaPipe Tasks
+# y expone métodos de alto nivel (detect, draw_landmarks, get_finger_states).
 class HandDetector:
     """Detector de manos basado en MediaPipe Hands"""
     
@@ -32,12 +105,14 @@ class HandDetector:
             model_path: Ruta al archivo del modelo (default: data/models/hand_landmarker.task)
             use_simulated_fallback: Activa landmarks simulados si MediaPipe falla
         """
+        # Guardar la configuración recibida para referencia posterior
         self.max_hands = max_hands
         self.detection_confidence = detection_confidence
         self.tracking_confidence = tracking_confidence
         self.use_simulated_fallback = use_simulated_fallback
         self.hand_landmarker = None
         
+        # Si MediaPipe no pudo importarse, no se puede crear el detector real
         if mp is None:
             print("Error: MediaPipe no está disponible")
             return
@@ -53,6 +128,7 @@ class HandDetector:
         
         # Usar la nueva API de MediaPipe Tasks con modelo descargado
         try:
+            # Referencias a las clases de la API de MediaPipe Tasks
             HandLandmarker = mp.tasks.vision.HandLandmarker
             VisionRunningMode = mp.tasks.vision.RunningMode
             
@@ -118,6 +194,7 @@ class HandDetector:
                 
                 return hand_landmarks_list
             
+            # No se detectaron manos en este frame
             return None
             
         except Exception as e:
@@ -128,6 +205,8 @@ class HandDetector:
     
     def _detect_simulated(self, frame: np.ndarray) -> List[List[Tuple[float, float, float]]]:
         """Detección simulada como fallback"""
+        # Genera 21 landmarks fijos (coordenadas normalizadas 0-1) con forma
+        # de mano abierta, para poder probar el pipeline sin MediaPipe.
         h, w = frame.shape[:2]
         
         # Crear puntos simulados en forma de mano
@@ -177,32 +256,7 @@ class HandDetector:
         Returns:
             Frame con landmarks dibujados
         """
-        if not landmarks_list:
-            return frame
-        
-        # Crear objeto de landmarks para dibujar
-        annotated_frame = frame.copy()
-        
-        for landmarks in landmarks_list:
-            # Convertir landmarks normalizados a coordenadas de píxeles
-            h, w = frame.shape[:2]
-            pixel_landmarks = []
-            
-            for x, y, z in landmarks:
-                pixel_x = int(x * w)
-                pixel_y = int(y * h)
-                pixel_landmarks.append((pixel_x, pixel_y))
-            
-            # Dibujar puntos
-            for i, (px, py) in enumerate(pixel_landmarks):
-                cv2.circle(annotated_frame, (px, py), 5, (0, 255, 0), -1)
-                cv2.putText(annotated_frame, str(i), (px + 8, py - 8),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
-            
-            # Dibujar conexiones
-            self._draw_connections(annotated_frame, pixel_landmarks)
-        
-        return annotated_frame
+        return draw_hand_landmarks(frame, landmarks_list)
     
     def _draw_connections(self, frame: np.ndarray, landmarks: List[Tuple[int, int]]) -> None:
         """
@@ -212,27 +266,7 @@ class HandDetector:
             frame: Frame donde dibujar
             landmarks: Lista de coordenadas de landmarks
         """
-        # Conexiones de la mano según MediaPipe
-        connections = [
-            # Pulgar
-            (0, 1), (1, 2), (2, 3), (3, 4),
-            # Índice
-            (0, 5), (5, 6), (6, 7), (7, 8),
-            # Medio
-            (5, 9), (9, 10), (10, 11), (11, 12),
-            # Anular
-            (9, 13), (13, 14), (14, 15), (15, 16),
-            # Meñique
-            (13, 17), (17, 18), (18, 19), (19, 20),
-            # Conexión muñeca-meñique
-            (0, 17)
-        ]
-        
-        for start_idx, end_idx in connections:
-            if start_idx < len(landmarks) and end_idx < len(landmarks):
-                start_point = landmarks[start_idx]
-                end_point = landmarks[end_idx]
-                cv2.line(frame, start_point, end_point, (255, 0, 0), 2)
+        _draw_connections(frame, landmarks)
     
     def get_finger_states(self, landmarks: List[Tuple[float, float, float]]) -> List[bool]:
         """
@@ -244,6 +278,7 @@ class HandDetector:
         Returns:
             Lista de 5 booleanos: [pulgar, indice, medio, anular, menique]
         """
+        # Validar que se recibieron los 21 landmarks esperados
         if len(landmarks) != 21:
             return [False] * 5
         
@@ -272,5 +307,7 @@ class HandDetector:
     
     def cleanup(self):
         """Libera recursos de MediaPipe"""
-        if hasattr(self, 'hand_landmarker'):
+        # Cerrar el HandLandmarker para liberar la memoria del modelo cargado
+        if getattr(self, 'hand_landmarker', None) is not None:
             self.hand_landmarker.close()
+            self.hand_landmarker = None

@@ -2,13 +2,34 @@
 """
 Módulo de configuración del sistema
 Centraliza todas las configuraciones y parámetros
+
+Define la clase Config, que agrupa en un solo lugar todos los parámetros
+del traductor de lenguaje de señas: cámara, MediaPipe, TensorFlow,
+procesamiento de frames, interfaz gráfica, logging, rutas del sistema,
+rendimiento y señas soportadas.
+
+Características principales:
+- Valores por defecto razonables para todos los parámetros.
+- Posibilidad de sobrescribir valores mediante variables de entorno
+  (por ejemplo CAMERA_WIDTH, LOG_LEVEL, ENABLE_GPU).
+- Creación automática de los directorios de trabajo necesarios.
+- Guardado y carga de la configuración completa en formato JSON.
+- Métodos "get_*" que devuelven copias de cada sección para evitar
+  modificaciones accidentales del estado interno.
 """
 
 import os
 from typing import Dict, Any
 
 class Config:
-    """Clase de configuración centralizada"""
+    """
+    Clase de configuración centralizada
+
+    Al instanciarse, inicializa cada sección de configuración como un
+    diccionario de atributos (camera_config, mediapipe_config, etc.),
+    aplica las variables de entorno definidas y crea los directorios
+    de trabajo (models, logs, data, temp) si no existen.
+    """
     
     def __init__(self):
         """Inicializa la configuración con valores por defecto"""
@@ -97,7 +118,15 @@ class Config:
         self._create_directories()
     
     def _load_from_env(self):
-        """Carga configuración desde variables de entorno"""
+        """
+        Carga configuración desde variables de entorno
+
+        Recorre un mapeo de variables de entorno conocidas hacia la sección
+        y clave de configuración correspondientes, convirtiendo el valor de
+        texto al tipo adecuado (int, float, bool o str). Si la variable no
+        está definida, se conserva el valor por defecto.
+        """
+        # Mapeo: nombre de variable de entorno -> (sección, clave, tipo).
         env_mappings = {
             'CAMERA_WIDTH': ('camera_config', 'width', int),
             'CAMERA_HEIGHT': ('camera_config', 'height', int),
@@ -109,10 +138,15 @@ class Config:
             'ENABLE_GPU': ('performance_config', 'enable_gpu', bool)
         }
         
+        # Se procesa cada variable: si existe en el entorno, se convierte al
+        # tipo esperado y se sobrescribe el valor por defecto de esa sección.
         for env_var, (config_section, config_key, type_func) in env_mappings.items():
             env_value = os.getenv(env_var)
             if env_value is not None:
                 try:
+                    # Los booleanos requieren un tratamiento especial porque
+                    # bool("false") sería True; se aceptan varias formas
+                    # comunes de expresar "verdadero".
                     if type_func == bool:
                         value = env_value.lower() in ('true', '1', 'yes', 'on')
                     else:
@@ -125,6 +159,7 @@ class Config:
     
     def _create_directories(self):
         """Crea los directorios necesarios si no existen"""
+        # Lista de directorios de trabajo que la aplicación necesita.
         directories = [
             self.paths['models_dir'],
             self.paths['logs_dir'],
@@ -132,6 +167,7 @@ class Config:
             self.paths['temp_dir']
         ]
         
+        # Se crea cada directorio solo si aún no existe en disco.
         for directory in directories:
             if not os.path.exists(directory):
                 os.makedirs(directory)
@@ -178,6 +214,8 @@ class Config:
             key: Clave a actualizar
             value: Nuevo valor
         """
+        # Se busca el atributo "<section>_config"; si existe, se actualiza
+        # la clave indicada; de lo contrario, se informa el error.
         if hasattr(self, f"{section}_config"):
             getattr(self, f"{section}_config")[key] = value
             print(f"Configuración actualizada: {section}.{key} = {value}")
@@ -193,6 +231,8 @@ class Config:
         """
         import json
         
+        # Se arma un diccionario con todas las secciones de configuración
+        # para serializarlas juntas.
         config_dict = {}
         sections = ['camera', 'mediapipe', 'tensorflow', 'processing', 
                    'interface', 'logging', 'performance', 'signs']
@@ -200,8 +240,11 @@ class Config:
         for section in sections:
             config_dict[section] = getattr(self, f"{section}_config")
         
+        # Las rutas del sistema también forman parte del archivo guardado.
         config_dict['paths'] = self.paths
         
+        # Se escribe el JSON con indentación para que sea legible; cualquier
+        # error de escritura se informa sin interrumpir la aplicación.
         try:
             with open(config_path, 'w') as f:
                 json.dump(config_dict, f, indent=2)
@@ -218,14 +261,19 @@ class Config:
         """
         import json
         
+        # Si el archivo no existe, se avisa y se mantienen los valores
+        # actuales de configuración.
         if not os.path.exists(config_path):
             print(f"Archivo de configuración no encontrado: {config_path}")
             return
         
         try:
+            # Se lee y parsea el archivo JSON completo.
             with open(config_path, 'r') as f:
                 config_dict = json.load(f)
             
+            # Solo se reemplazan las secciones presentes en el archivo;
+            # las ausentes conservan sus valores actuales.
             sections = ['camera', 'mediapipe', 'tensorflow', 'processing', 
                        'interface', 'logging', 'performance', 'signs']
             
@@ -233,6 +281,7 @@ class Config:
                 if section in config_dict:
                     setattr(self, f"{section}_config", config_dict[section])
             
+            # Las rutas del sistema se restauran si estaban guardadas.
             if 'paths' in config_dict:
                 self.paths = config_dict['paths']
             

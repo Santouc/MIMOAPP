@@ -3,13 +3,13 @@ from collections import Counter, deque
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from app.app_context import AppContext
-from core.hand_detector import HandDetector
-from core.image_processor import ImageProcessor
+from app.camera_worker import CameraWorker
+from core.hand_detector import draw_hand_landmarks
 from ml.clasificador import SignClassifier
 from ml.dynamic_classifier import DynamicSignClassifier
 from app.widgets import TranscriptionCorrectionDialog
@@ -25,13 +25,9 @@ class TranslateScreen(QWidget):
     def __init__(self, context: AppContext, parent=None):
         super().__init__(parent)
         self.context = context
-        self.capture = None
-        self.hand_detector = None
-        self.image_processor = ImageProcessor()
+        self.camera_worker = None
         self.static_classifier = None
         self.dynamic_classifier = None
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._process_frame)
         self.sign_buffer = deque(maxlen=10)
         self.dynamic_sequence = deque(maxlen=20)
         self.dynamic_buffer = deque(maxlen=5)
@@ -52,13 +48,21 @@ class TranslateScreen(QWidget):
         self._build_ui()
 
     def stop_camera(self) -> None:
-        self.timer.stop()
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-        if self.hand_detector is not None:
-            self.hand_detector.cleanup()
-            self.hand_detector = None
+        if self.camera_worker is not None:
+            worker = self.camera_worker
+            self.camera_worker = None
+            try:
+                worker.frame_ready.disconnect(self._on_frame_ready)
+                worker.camera_failed.disconnect(self._on_camera_failed)
+                worker.stop()
+            except RuntimeError:
+                # El hilo ya terminó y Qt liberó el objeto (finished -> deleteLater).
+                pass
+
+    def _on_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is not None and worker is self.camera_worker:
+            self.camera_worker = None
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -126,20 +130,25 @@ class TranslateScreen(QWidget):
         layout.addLayout(buttons)
 
     def _start_camera(self) -> None:
+        self.stop_camera()
         self._load_classifiers()
         self.context.transcription.reset()
         self._reset_buffers()
-        self.capture = cv2.VideoCapture(0)
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.capture.set(cv2.CAP_PROP_FPS, 30)
-        if not self.capture.isOpened():
-            self.capture = None
-            QMessageBox.critical(self, "Cámara no disponible", "No se pudo abrir la cámara.")
-            return
-        self.hand_detector = HandDetector(max_hands=1)
-        self.timer.start(30)
+        # El overlay (landmarks estabilizados + textos) lo dibuja esta pantalla,
+        # por eso el worker se crea sin dibujo propio.
+        self.camera_worker = CameraWorker(max_hands=1, draw_landmarks=False, parent=self)
+        self.camera_worker.frame_ready.connect(self._on_frame_ready)
+        self.camera_worker.camera_failed.connect(self._on_camera_failed)
+        self.camera_worker.finished.connect(self._on_worker_finished)
+        self.video_label.setText("Abriendo cámara...")
+        self.camera_worker.start()
         self.status_label.setText(self._model_status_text())
+
+    def _on_camera_failed(self, message: str) -> None:
+        self.stop_camera()
+        self.video_label.setText("Cámara detenida")
+        self.status_label.setText("Estado: cámara no disponible")
+        QMessageBox.critical(self, "Cámara no disponible", message)
 
     def _load_classifiers(self) -> None:
         self.static_classifier = SignClassifier(
@@ -152,21 +161,25 @@ class TranslateScreen(QWidget):
             sequence_length=20,
         )
 
-    def _process_frame(self) -> None:
-        if self.capture is None:
+    def _on_frame_ready(self, frame, raw_landmarks: list) -> None:
+        # Slot en el hilo de la UI: la captura y MediaPipe ya ocurrieron en
+        # CameraWorker; aquí solo se estabiliza, se infiere, se dibuja el
+        # overlay y se pinta el pixmap.
+        worker = self.camera_worker
+        if worker is None:
             return
-        ok, frame = self.capture.read()
-        if not ok:
-            return
-        frame = cv2.flip(frame, 1)
-        processed = self.image_processor.preprocess(frame)
-        raw_landmarks = self.hand_detector.detect(processed) if self.hand_detector else None
+        try:
+            self._process_frame(frame, raw_landmarks or None)
+        finally:
+            worker.frame_consumed()
+
+    def _process_frame(self, processed, raw_landmarks) -> None:
         landmarks = self._stabilize_landmarks(raw_landmarks)
 
         static_sign = None
         dynamic_sign = None
         if landmarks is not None:
-            processed = self.hand_detector.draw_landmarks(processed, landmarks)
+            processed = draw_hand_landmarks(processed, landmarks)
             self._update_motion_state(landmarks)
             static_sign = self._process_static_prediction(landmarks)
             dynamic_sign = self._process_dynamic_prediction(landmarks)

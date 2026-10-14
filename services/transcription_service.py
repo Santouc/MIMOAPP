@@ -10,6 +10,7 @@ except ImportError:
     wordfreq = None
 
 from .path_service import PathService
+from utils.atomic_io import atomic_write_json
 
 LEXICON_SIZE = 50000
 MIN_ZIPF = 3.0
@@ -160,7 +161,7 @@ class TranscriptionService:
         self.rules_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.rules_path.exists():
             initial = {"language": DEFAULT_LANGUAGE, **self._spanish_defaults()}
-            self.rules_path.write_text(json.dumps(initial, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_write_json(self.rules_path, initial)
             return initial
         try:
             loaded = json.loads(self.rules_path.read_text(encoding="utf-8-sig"))
@@ -171,13 +172,12 @@ class TranscriptionService:
         return {}
 
     def _save_user_rules(self) -> None:
-        self.rules_path.parent.mkdir(parents=True, exist_ok=True)
-        self.rules_path.write_text(json.dumps(self._user_rules, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(self.rules_path, self._user_rules)
 
     def _load_memory(self) -> dict[str, str]:
         self.memory_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.memory_path.exists():
-            self.memory_path.write_text("{}", encoding="utf-8")
+            atomic_write_json(self.memory_path, {})
             return {}
         try:
             loaded = json.loads(self.memory_path.read_text(encoding="utf-8-sig"))
@@ -188,8 +188,7 @@ class TranscriptionService:
         return {}
 
     def _save_memory(self) -> None:
-        self.memory_path.parent.mkdir(parents=True, exist_ok=True)
-        self.memory_path.write_text(json.dumps(self.memory, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(self.memory_path, self.memory)
 
     def _merge_rules(self, default_rules: dict, loaded: dict) -> dict:
         if not isinstance(loaded, dict):

@@ -3,6 +3,19 @@
 Módulo de clasificación de señas usando TensorFlow
 Responsable de interpretar los landmarks y clasificar las señas
 Versión híbrida: combina modelo ML con reglas fallback y logging profesional
+
+Este módulo se encarga de las señas ESTÁTICAS: cada predicción se realiza
+sobre un único frame de 21 landmarks 3D de la mano detectados por MediaPipe
+(a diferencia de ml/dynamic_classifier.py, que trabaja con secuencias).
+
+Contenido principal:
+- SignClassifier: clase que carga el modelo Keras (.h5) y las etiquetas
+  (labels.json), preprocesa los landmarks y clasifica. También incluye
+  utilidades de entrenamiento, evaluación y serialización de datasets.
+- predict_sign(): función de interfaz externa con instancia global
+  persistente, que devuelve una respuesta estructurada en diccionario.
+
+El modelo consumido aquí se genera con ml/train.py.
 """
 
 import numpy as np
@@ -130,7 +143,15 @@ class SignClassifier:
         Preprocesamiento usando módulo centralizado
         
         Usa core.preprocessing.normalize_landmarks para consistencia en todo el sistema.
+
+        Args:
+            landmarks: Lista de manos; cada mano es una lista de 21 tuplas (x, y, z).
+
+        Returns:
+            Array normalizado con forma (1, 21, 3) listo para el modelo.
+            Si no hay landmarks o falla la normalización, devuelve ceros.
         """
+        # Sin landmarks detectados: devolver un tensor de ceros como entrada neutra
         if landmarks is None or len(landmarks) == 0:
             logger.warning("No se detectaron landmarks")
             return np.zeros((1, 21, 3), dtype=np.float32)
@@ -149,20 +170,31 @@ class SignClassifier:
         Clasificación usando modelo sin fallback
         
         Retorna siempre (label, confidence) con contrato consistente
+
+        Args:
+            landmarks: Lista de manos; cada mano es una lista de 21 tuplas (x, y, z).
+
+        Returns:
+            Tupla (etiqueta, confianza); "unknown" si no hay modelo, la
+            confianza es menor a 0.5 o se produce cualquier error.
         """
+        # Sin modelo cargado no es posible clasificar
         if self.model is None:
             logger.warning("No hay modelo disponible")
             return "unknown", 0.0
         
         try:
+            # Normalizar los landmarks al formato de entrada del modelo
             x = self.preprocess(landmarks)
             
             # Validar consistencia de input shape
             if x.shape != (1, 21, 3):
                 raise ValueError(f"Input shape inválido: {x.shape}, esperado (1, 21, 3)")
             
+            # Inferencia: obtener la distribución de probabilidad sobre las clases
             preds = self.model.predict(x, verbose=0)
             
+            # Tomar la clase con mayor probabilidad y su confianza asociada
             idx = int(np.argmax(preds[0]))
             confidence = float(np.max(preds[0]))
             
